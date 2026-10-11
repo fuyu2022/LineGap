@@ -19,3 +19,10 @@ Stage 3: Dash distance is increased.
 Taking damage grants two seconds of invulnerability. Best scores are saved automatically.
 
 Engine and third-party notices are in Godot-Licenses.txt.
+
+Music: Click Music: On / Off beside the language button to toggle background
+music only. Sound effects remain enabled. Music is on by default and your
+choice is saved. Turning it back on resumes playback; pausing or restarting
+a run does not restart the track.
+Background music: Bumba Crossing by Kevin MacLeod (incompetech.com), CC BY 4.0.
+See Music-Credits.txt for the source and license links.

@@ -23,13 +23,15 @@ $lineReadmeText = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'packaging\�
 $lineReadmeText.Replace('{VERSION}', $lineGameVersion) | Set-Content -LiteralPath (Join-Path $linePackageDir '使用说明.txt') -Encoding utf8
 $lineEnglishReadme = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'packaging\README-Windows.txt') -Raw
 $lineEnglishReadme.Replace('{VERSION}', $lineGameVersion) | Set-Content -LiteralPath (Join-Path $linePackageDir 'README.txt') -Encoding utf8
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\music\ATTRIBUTION.txt') -Destination (Join-Path $linePackageDir 'Music-Credits.txt') -Force
 
 $linePackageFiles = @(
     $linePackageExe,
     (Join-Path $linePackageDir 'LineGap.pck'),
     (Join-Path $linePackageDir '使用说明.txt'),
     (Join-Path $linePackageDir 'README.txt'),
-    (Join-Path $linePackageDir 'Godot-Licenses.txt')
+    (Join-Path $linePackageDir 'Godot-Licenses.txt'),
+    (Join-Path $linePackageDir 'Music-Credits.txt')
 )
 Compress-Archive -LiteralPath $linePackageFiles -DestinationPath $linePackageZip -CompressionLevel Optimal -Force
 Get-Item -LiteralPath $linePackageZip | Select-Object FullName, Length

@@ -1,0 +1,111 @@
+name: Deploy LINE GAP to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+env:
+  GODOT_VERSION: 4.7.2
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set Godot paths
+        shell: pwsh
+        run: |
+          $lineGodotDir = Join-Path $env:RUNNER_TEMP "linegap-godot/$env:GODOT_VERSION"
+          $lineTemplateDir = Join-Path $env:APPDATA "Godot/export_templates/$env:GODOT_VERSION.stable"
+          "LINEGAP_GODOT_DIR=$lineGodotDir" >> $env:GITHUB_ENV
+          "LINEGAP_TEMPLATE_DIR=$lineTemplateDir" >> $env:GITHUB_ENV
+          "LINEGAP_GODOT_PATH=$(Join-Path $lineGodotDir "Godot_v$env:GODOT_VERSION-stable_win64_console.exe")" >> $env:GITHUB_ENV
+
+      - name: Cache Godot and Web export templates
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.LINEGAP_GODOT_DIR }}
+            ${{ env.LINEGAP_TEMPLATE_DIR }}
+          key: ${{ runner.os }}-linegap-godot-${{ env.GODOT_VERSION }}-web-v1
+
+      - name: Install Godot and matching Web templates
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $lineReleaseUrl = "https://github.com/godotengine/godot-builds/releases/download/$env:GODOT_VERSION-stable"
+          $lineEngineZip = Join-Path $env:RUNNER_TEMP 'linegap-engine.zip'
+          $lineTemplatesZip = Join-Path $env:RUNNER_TEMP 'linegap-templates.zip'
+          Invoke-WebRequest "$lineReleaseUrl/Godot_v$env:GODOT_VERSION-stable_win64.exe.zip" -OutFile $lineEngineZip
+          Expand-Archive -LiteralPath $lineEngineZip -DestinationPath $env:LINEGAP_GODOT_DIR -Force
+          Invoke-WebRequest "$lineReleaseUrl/Godot_v$env:GODOT_VERSION-stable_export_templates.tpz" -OutFile $lineTemplatesZip
+          New-Item -ItemType Directory -Path $env:LINEGAP_TEMPLATE_DIR -Force | Out-Null
+          $lineArchive = [System.IO.Compression.ZipFile]::OpenRead($lineTemplatesZip)
+          try {
+            foreach ($lineName in @('version.txt', 'web_nothreads_debug.zip', 'web_nothreads_release.zip')) {
+              $lineEntry = $lineArchive.GetEntry("templates/$lineName")
+              if ($null -eq $lineEntry) { throw "Missing Web template: $lineName" }
+              [System.IO.Compression.ZipFileExtensions]::ExtractToFile($lineEntry, (Join-Path $env:LINEGAP_TEMPLATE_DIR $lineName), $true)
+            }
+          } finally { $lineArchive.Dispose() }
+
+      - name: Verify installed Godot version
+        shell: pwsh
+        run: |
+          $lineVersion = & $env:LINEGAP_GODOT_PATH --version
+          if ($LASTEXITCODE -ne 0 -or $lineVersion -notlike "$env:GODOT_VERSION.stable.*") {
+            throw "Unexpected Godot version: $lineVersion"
+          }
+          $lineTemplateVersion = (Get-Content (Join-Path $env:LINEGAP_TEMPLATE_DIR 'version.txt') -Raw).Trim()
+          if ($lineTemplateVersion -ne "$env:GODOT_VERSION.stable") {
+            throw "Unexpected export template version: $lineTemplateVersion"
+          }
+
+      - name: Export complete Web game
+        shell: pwsh
+        run: ./build-web.ps1 -GodotPath $env:LINEGAP_GODOT_PATH
+
+      - name: Check game logic and exported audio
+        shell: pwsh
+        run: |
+          & $env:LINEGAP_GODOT_PATH --headless --path . --script res://tests/game_test.gd
+          if ($LASTEXITCODE -ne 0) { throw 'Game logic checks failed.' }
+          foreach ($lineFile in @('index.html', 'index.js', 'index.wasm', 'index.pck', 'audio.js', 'audio/collect.wav', 'audio/hit.wav', 'audio/shatter.wav', 'audio/death.wav', 'audio/bumba-crossing.mp3', 'Music-Credits.txt', 'Font-License.txt', 'Godot-Licenses.txt', '.nojekyll')) {
+            if (-not (Test-Path -LiteralPath (Join-Path 'builds/LineGap-Web' $lineFile))) {
+              throw "Missing exported file: $lineFile"
+            }
+          }
+
+      - name: Upload complete Web directory
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: builds/LineGap-Web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Deploy game
+        id: deployment
+        uses: actions/deploy-pages@v4

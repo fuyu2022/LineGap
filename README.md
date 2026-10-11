@@ -15,6 +15,7 @@
 - R：立即重开。
 - 开始 / 重开 / 继续按钮也可以点击。
 - 右下角 English / 中文：切换界面语言，选择自动保存。首次启动按系统语言选择，中文语言环境使用中文，其余使用英文。切换会保留当前进度、暂停状态与冲刺冷却。
+- 右下角“音乐：开 / 关”：只切换背景音乐，音效照常播放。默认开启，选择自动保存。关闭后再开启从原位置继续，暂停和重开游戏不会重置音乐。网页版在首次点击或按键后开始播放。
 
 ## 冲刺
 
@@ -44,7 +45,9 @@
 
 最高分、最长存活时间保存在 Godot 用户数据目录的 `records.cfg`，既有游戏纪录保留。
 
-游戏逻辑在 `scripts/game.gd`，冲刺光圈在 `scripts/dash_ripple.gd`。收集、击碎和死亡音效由代码合成：击碎是清脆的高频碎裂声，带短暂的碎片叮响，死亡是带低频的下坠撞击声。音效使用独立播放器，连续击碎和拾取不会互相截断，并经过限幅处理。项目不采集系统音频，不依赖音乐、麦克风或后台采集程序。窗口可缩放。
+游戏逻辑在 `scripts/game.gd`，冲刺光圈在 `scripts/dash_ripple.gd`。收集、击碎和死亡音效由代码合成：击碎是清脆的高频碎裂声，带短暂的碎片叮响，死亡是带低频的下坠撞击声。音效使用独立播放器，连续击碎和拾取不会互相截断，并经过限幅处理。项目不采集系统音频，不依赖麦克风或后台采集程序。窗口可缩放。
+
+背景音乐使用独立播放器循环播放 `assets/music/bumba-crossing.mp3`，以较低音量播放，不影响音效总线。曲目为 [Bumba Crossing](https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1500031)，作者 Kevin MacLeod（incompetech.com），授权 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)。原始 MP3 内容未修改，仅重命名；游戏内降低播放音量并循环播放。标题、暂停和结束页显示署名，完整说明见 `assets/music/ATTRIBUTION.txt`，Windows 压缩包同时包含 `Music-Credits.txt`。
 
 静态背景独立缓存，点阵通过几何实例一次绘制；碎片与火花按组批量提交，保留碎裂、发光与淡出效果。碰撞逻辑维持每秒 120 次更新，绘制只在每个显示帧提交一次，避免物理补帧时重复重建整幅画面。
 
@@ -73,3 +76,29 @@
 运行 `build.ps1` 可导出 Windows x64 免安装版，需 Godot 4.7.2 与匹配的 Windows 导出模板。打包文件名自动读取 `project.godot` 的版本号，当前成品为 `builds/LineGap-v0.1.0-beta-Windows-x64.zip`。解压后双击 `LineGap.exe`，并保留同目录的 `LineGap.pck`。压缩包包含程序、游戏数据、操作说明及引擎许可证。
 
 `export_presets.cfg` 仅选择主场景及其运行依赖，不导出测试、截图、日志和开发工具。源码的启动脚本使用本机已有 Godot 的路径，免安装版运行时不依赖该路径。
+
+## Web 导出与 GitHub Pages
+
+运行 `build-web.ps1`，需要 Godot 4.7.2 及匹配的单线程 Web 导出模板。可用 `-GodotPath` 指定引擎路径。成品目录是 `builds/LineGap-Web/`，压缩包是 `builds/LineGap-v0.1.0-beta-Web.zip`。
+
+Web 预设使用 Compatibility 渲染、单线程，关闭扩展及 PWA，不需要 COOP/COEP 响应头。`index.html`、引擎文件、`audio.js`、`audio/` 和许可文件必须一起发布。资源采用相对地址，可部署到 GitHub Pages 的仓库子路径。解压后可用 Python 运行 `preview.cmd` 预览；不能通过双击 `index.html` 的 `file://` 地址运行。源码目录预览也可执行：
+
+```powershell
+python -m http.server 4265 --bind 127.0.0.1 --directory builds/LineGap-Web
+```
+
+浏览器打开 `http://127.0.0.1:4265/`。首次点击游戏或按空格启用声音。音乐循环播放，开关只影响音乐；关闭后再开启保留位置，重开、暂停和结束页面保持音乐。纪录、语言和音乐开关保存在当前站点的浏览器数据中，清除站点数据会清除这些设置。
+
+Web 音效由 `tools/export_web_audio.gd` 调用与桌面版相同的合成代码生成四个 WAV，每次构建重新生成。`web/audio.js` 使用 Web Audio 播放独立音效，并限制重叠数量、压缩混音和设置最终输出上限；音乐使用循环的 HTML 音频播放器接入独立音量通道。Godot 在 Web 上使用 Dummy 音频驱动，避免再启动一个未使用的混音器。Windows 继续使用原有 Godot 播放器。
+
+网页字体是 Noto Sans SC 的子集，使用 SIL OFL 1.1，字体文件和许可位于 `assets/fonts/`。增加新文字时，可运行 `python tools/subset_web_font.py` 重新生成字体（需要 Python 的 fontTools 包；首次会下载原始字体），然后重新导出。网页底部包含音乐来源、CC BY 4.0、引擎和字体许可证链接。
+
+在 GitHub Pages 中发布成品目录全部内容，并把 `index.html` 放在发布目录根部；从分支发布时同时保留 `.nojekyll`。本地导出不会自动上传或启用 Pages。
+
+### GitHub Actions 自动发布
+
+仓库已经包含 `.github/workflows/pages.yml`。在 [仓库 Pages 设置](https://github.com/fuyu2022/LineGap/settings/pages) 的 **Build and deployment → Source** 中选择 **GitHub Actions**，然后提交游戏源码、资源和工作流到 `main` 分支。无需把 `builds/` 导出文件提交到 Git。
+
+推送到 `main` 或手动触发工作流后，GitHub 的 Windows runner 下载并缓存 Godot 4.7.2 和对应的单线程 Web 模板，运行 `build-web.ps1`，验证游戏逻辑及音频文件，上传整个 `builds/LineGap-Web/` 目录，然后部署到 Pages。工作流使用 GitHub 自动提供的令牌，不需要手动创建 Token 或添加 Secret。
+
+在 [Actions 页面](https://github.com/fuyu2022/LineGap/actions) 查看 **Deploy LINE GAP to GitHub Pages**。两个任务 `build` 和 `deploy` 成功后，访问 `https://fuyu2022.github.io/LineGap/`。以后更新源码并推送到 `main` 就会自动更新网页；也可在 Actions 工作流页面点击 **Run workflow** 重试。未来升级 Godot 时，同时更新工作流中的 `GODOT_VERSION` 和项目/本地导出使用的版本。

@@ -35,6 +35,9 @@ func run() -> void:
 	root.add_child(game)
 	game.set_physics_process(false)
 	game._setup_audio()
+	# Finish initial font/geometry uploads before measuring a 150 ms sound.
+	await process_frame
+	await RenderingServer.frame_post_draw
 	var shatter = game.sound_players[game.shatter_sound.get_instance_id()]
 	var death = game.sound_players[game.death_sound.get_instance_id()]
 	var collect = game.sound_players[game.collect_sound.get_instance_id()]

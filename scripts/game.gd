@@ -22,6 +22,9 @@ const MAX_LIVES := 3
 const DASH_FULL_DURATION := 0.28
 const HIT_GRACE := 2.0
 const LANGUAGE_BUTTON := Rect2(916, 662, 116, 36)
+const MUSIC_BUTTON := Rect2(748, 662, 152, 36)
+const BACKGROUND_MUSIC_PATH := "res://assets/music/bumba-crossing.mp3"
+const WEB_FONT_PATH := "res://assets/fonts/LineGapSans-Regular.ttf"
 const UI_TEXT := {
 	"zh": {
 		"name": "线隙", "title": "线 隙", "broken": "击碎", "score": "得分",
@@ -31,7 +34,8 @@ const UI_TEXT := {
 		"cooldown": "冷却 %.1f 秒", "dead": "本局结束", "paused": "已暂停",
 		"start": "空格  开始", "restart": "空格  重开", "resume": "空格  继续",
 		"stats": "存活 %.1f 秒   ·   收集 %d   ·   击碎 %d", "final_score": "得分  %05d",
-		"new_best": "新纪录", "switch_language": "English"
+		"new_best": "新纪录", "switch_language": "English",
+		"music_on": "音乐：开", "music_off": "音乐：关"
 	},
 	"en": {
 		"name": "LINE GAP", "title": "LINE GAP", "broken": "BROKEN", "score": "SCORE",
@@ -41,7 +45,8 @@ const UI_TEXT := {
 		"cooldown": "Cooldown %.1fs", "dead": "RUN OVER", "paused": "PAUSED",
 		"start": "Space  Start", "restart": "Space  Restart", "resume": "Space  Resume",
 		"stats": "Survived %.1fs   ·   Orbs %d   ·   Broken %d", "final_score": "Score  %05d",
-		"new_best": "NEW BEST", "switch_language": "中文"
+		"new_best": "NEW BEST", "switch_language": "中文",
+		"music_on": "Music: On", "music_off": "Music: Off"
 	}
 }
 
@@ -92,14 +97,21 @@ var last_move_direction := Vector2.UP
 var background_layer: Node2D
 var grid_dots: MultiMesh
 var language := "zh"
+var music_enabled := true
+var music_player: AudioStreamPlayer
+var web_audio
+var web_sound_names: Dictionary = {}
 
 
 func _ready() -> void:
-	var system_font := SystemFont.new()
-	system_font.font_names = PackedStringArray(["Microsoft YaHei", "Noto Sans CJK SC", "sans-serif"])
-	system_font.multichannel_signed_distance_field = true
-	system_font.msdf_size = 96
-	font = system_font
+	if OS.has_feature("web"):
+		font = load(WEB_FONT_PATH)
+	else:
+		var system_font := SystemFont.new()
+		system_font.font_names = PackedStringArray(["Microsoft YaHei", "Noto Sans CJK SC", "sans-serif"])
+		system_font.multichannel_signed_distance_field = true
+		system_font.msdf_size = 96
+		font = system_font
 	rng.randomize()
 	_build_grid()
 	background_layer = Node2D.new()
@@ -118,12 +130,15 @@ func _ready() -> void:
 	_load_language()
 	if not test_mode:
 		_load_record()
+		_load_music_preference()
 		_setup_audio()
+		_setup_music()
 	queue_redraw()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
+		_start_music_if_enabled()
 		if event.keycode == KEY_SPACE:
 			if phase == Phase.READY or phase == Phase.DEAD:
 				begin_run()
@@ -140,6 +155,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			begin_run()
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var click: Vector2 = get_global_transform_with_canvas().affine_inverse() * event.position
+		if MUSIC_BUTTON.has_point(click):
+			set_music_enabled(not music_enabled)
+			return
+		_start_music_if_enabled()
 		if LANGUAGE_BUTTON.has_point(click):
 			set_language("en" if language == "zh" else "zh")
 			return
@@ -543,6 +562,71 @@ func ui_text(key: String) -> String:
 	return UI_TEXT[language][key]
 
 
+func _load_music_preference(path: String = SAVE_PATH) -> void:
+	var config := ConfigFile.new()
+	music_enabled = true
+	if config.load(path) == OK:
+		music_enabled = bool(config.get_value("settings", "music_enabled", true))
+
+
+func _save_music_preference(path: String = SAVE_PATH) -> void:
+	var config := ConfigFile.new()
+	config.load(path)
+	config.set_value("settings", "music_enabled", music_enabled)
+	var result := config.save(path)
+	if result != OK:
+		push_warning("Could not save music preference: %s" % error_string(result))
+
+
+func set_music_enabled(enabled: bool) -> void:
+	music_enabled = enabled
+	if web_audio != null:
+		web_audio.setMusicEnabled(music_enabled)
+	if music_player != null:
+		if music_enabled:
+			_start_music_if_enabled()
+		else:
+			music_player.stream_paused = true
+	if not test_mode:
+		_save_music_preference()
+	queue_redraw()
+
+
+func _setup_music(autoplay: bool = true) -> void:
+	if OS.has_feature("web"):
+		web_audio = JavaScriptBridge.get_interface("LineGapAudio")
+		if web_audio != null:
+			web_audio.setMusicEnabled(music_enabled)
+		else:
+			push_error("LineGap Web audio script is missing.")
+		return
+	music_player = AudioStreamPlayer.new()
+	music_player.name = "BackgroundMusic"
+	var stream := load(BACKGROUND_MUSIC_PATH).duplicate() as AudioStreamMP3
+	stream.loop = true
+	stream.loop_offset = 0.0
+	music_player.stream = stream
+	music_player.volume_db = -3.0
+	# If a playback backend reports an end, continue while the user's switch is on.
+	music_player.finished.connect(_start_music_if_enabled)
+	# Use its own player on Master; the SFX bus and its limiter stay independent.
+	add_child(music_player)
+	if autoplay and not OS.has_feature("web"):
+		_start_music_if_enabled()
+
+
+func _start_music_if_enabled() -> void:
+	if web_audio != null:
+		if music_enabled:
+			web_audio.startMusic()
+		return
+	if music_player == null or not music_enabled:
+		return
+	music_player.stream_paused = false
+	if not music_player.playing:
+		music_player.play()
+
+
 func _save_record() -> void:
 	var config := ConfigFile.new()
 	config.load(SAVE_PATH)
@@ -591,6 +675,18 @@ func _update_effects(delta: float) -> void:
 
 
 func _setup_audio() -> void:
+	collect_sound = _make_sound(720, 1180, 0.12)
+	shatter_sound = _make_impact_sound(false)
+	death_sound = _make_impact_sound(true)
+	hit_sound = _make_sound(340, 150, 0.1)
+	if OS.has_feature("web"):
+		web_sound_names = {
+			collect_sound.get_instance_id(): "collect",
+			shatter_sound.get_instance_id(): "shatter",
+			death_sound.get_instance_id(): "death",
+			hit_sound.get_instance_id(): "hit",
+		}
+		return
 	var bus := AudioServer.get_bus_index("LineGapSFX")
 	if bus < 0:
 		AudioServer.add_bus()
@@ -601,10 +697,6 @@ func _setup_audio() -> void:
 		limiter.ceiling_db = -1.0
 		limiter.release = 0.06
 		AudioServer.add_bus_effect(bus, limiter)
-	collect_sound = _make_sound(720, 1180, 0.12)
-	shatter_sound = _make_impact_sound(false)
-	death_sound = _make_impact_sound(true)
-	hit_sound = _make_sound(340, 150, 0.1)
 	for stream in [collect_sound, shatter_sound, death_sound, hit_sound]:
 		var player_node := AudioStreamPlayer.new()
 		player_node.stream = stream
@@ -683,6 +775,11 @@ func _make_sound(start_hz: float, end_hz: float, duration: float) -> AudioStream
 
 func _play_sound(stream: AudioStreamWAV) -> void:
 	if stream == null:
+		return
+	if web_audio != null:
+		var sound_name: String = web_sound_names.get(stream.get_instance_id(), "")
+		if not sound_name.is_empty():
+			web_audio.playEffect(sound_name)
 		return
 	var player_node = sound_players.get(stream.get_instance_id())
 	if player_node != null:
@@ -919,6 +1016,13 @@ func _draw_footer() -> void:
 	var ready_fraction := clampf(1.0 - dash_cooldown_remaining / dash_cooldown_duration, 0.0, 1.0)
 	if ready_fraction > 0:
 		draw_line(Vector2(420, 695), Vector2(420 + 226 * ready_fraction, 695), CYAN, 2, true)
+	var music_hover := MUSIC_BUTTON.has_point(get_global_mouse_position())
+	var music_color := CYAN if music_enabled else MUTED
+	draw_rect(MUSIC_BUTTON, music_color * Color(1, 1, 1, 0.045 if music_hover else 0.015))
+	draw_rect(MUSIC_BUTTON, music_color * Color(1, 1, 1, 0.6 if music_hover else 0.22), false, 1.0)
+	var music_label := ui_text("music_on" if music_enabled else "music_off")
+	var music_width := font.get_string_size(music_label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
+	_text(music_label, Vector2(MUSIC_BUTTON.get_center().x - music_width * 0.5, 685), 13, music_color)
 	var hover := LANGUAGE_BUTTON.has_point(get_global_mouse_position())
 	draw_rect(LANGUAGE_BUTTON, CYAN * Color(1, 1, 1, 0.045 if hover else 0.015))
 	draw_rect(LANGUAGE_BUTTON, CYAN * Color(1, 1, 1, 0.6 if hover else 0.22), false, 1.0)
@@ -949,6 +1053,8 @@ func _draw_overlay() -> void:
 	_center_text(button, 502, 18, CYAN)
 	if phase == Phase.DEAD and score > old_best:
 		_center_text(ui_text("new_best"), 559, 15, GOLD)
+	_center_text("Bumba Crossing — Kevin MacLeod (incompetech.com)", 593, 12, MUTED)
+	_center_text("CC BY 4.0 · creativecommons.org/licenses/by/4.0/", 615, 11, MUTED)
 
 
 func _text(value: String, at: Vector2, size: int, color: Color) -> void:
