@@ -1,0 +1,18 @@
+# Godot-generated cache (keep scripts/*.gd.uid in version control).
+/.godot/
+/export_credentials.cfg
+
+# Exported games, screenshots, profiling reports and temporary verification files.
+/builds/
+/artifacts/
+*.log
+*.tmp
+*.bak
+__pycache__/
+
+# Local editor and operating-system files.
+.vs/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
