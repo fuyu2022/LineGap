@@ -19,9 +19,11 @@ func _initialize() -> void:
 		var result: Error = sounds[name].save_to_wav(directory.path_join(name + ".wav"))
 		if result != OK:
 			printerr("Could not export ", name, ": ", error_string(result))
+			game.dash_ripple.free()
 			game.free()
 			quit(1)
 			return
+	game.dash_ripple.free()
 	game.free()
 	print("Exported four Web sound effects from the game synthesis code")
 	quit()

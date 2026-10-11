@@ -45,9 +45,10 @@ func run() -> void:
 		expect(game.font.get_string_size(game.ui_text("dash_controls"), HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x < 132, "Dash hint fits " + selected)
 		expect(game.font.get_string_size(game.ui_text("cooldown") % 1.5, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x < 100, "Cooldown fits " + selected)
 		expect(game.font.get_string_size(game.ui_text("stats") % [999.9, 999, 999], HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x < Game.ARENA.size.x, "Death statistics fit " + selected)
-		for key in ["score", "broken"]:
-			expect(game.font.get_string_size(game.ui_text(key), HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x < 56, "Record row label fits " + selected + ":" + key)
-		expect(game.font.get_string_size("999999", HORIZONTAL_ALIGNMENT_LEFT, -1, 23).x < 134, "Record score fits " + selected)
+		game.best = 999999
+		game.best_broken = 9999
+		game.best_time = 9999.9
+		expect(game.font.get_string_size(game._best_record_label(), HORIZONTAL_ALIGNMENT_LEFT, -1, game._best_record_font_size()).x <= Game.RECORD_LABEL_WIDTH, "Combined score, shatters and time fit " + selected)
 		expect(game.font.get_string_size(game.ui_text("best"), HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x < 190, "Record heading fits " + selected)
 		for key in ["start", "resume", "restart"]:
 			expect(game.font.get_string_size(game.ui_text(key), HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x < 260, "Button fits " + selected + ":" + key)

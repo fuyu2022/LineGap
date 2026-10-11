@@ -11,10 +11,18 @@ const SEPARATOR := Color("343a40")
 const RED := Color("ff758e")
 const GOLD := Color("ffd38a")
 const PLAYER_RADIUS := 7.0
+const MOBILE_WORLD_SCALE := 4.0
 const PLAYER_SPEED := 335.0
 const SAVE_PATH := "user://records.cfg"
 const LINE_SPEED := 90.0
 const DashRipple = preload("res://scripts/dash_ripple.gd")
+const MusicClock = preload("res://scripts/music_clock.gd")
+const MUSIC_WAVE_DURATION := 0.44
+const MUSIC_INPUT_BUFFER := 0.08
+const RECORD_LABEL_WIDTH := 264.0
+const MUSIC_WAVE_RADII := [110.0, 180.0, 250.0]
+const MUSIC_MODE_BUTTON := Rect2(742, 662, 146, 36)
+const MobileControls = preload("res://scripts/mobile_controls.gd")
 const DASH_SPEED := 1000.0
 const DASH_DURATION := 0.16
 const DASH_COOLDOWN := 1.5
@@ -30,6 +38,7 @@ const SETTINGS_BUTTON := Rect2(900, 662, 132, 36)
 const MUSIC_BUTTON := Rect2(558, 313, 148, 40)
 const LANGUAGE_BUTTON := Rect2(558, 395, 148, 40)
 const SETTINGS_CLOSE_BUTTON := Rect2(410, 482, 260, 44)
+const JOYSTICK_MODE_BUTTON := Rect2(600, 455, 220, 62)
 const BACKGROUND_MUSIC_PATH := "res://assets/music/bumba-crossing.mp3"
 const WEB_FONT_PATH := "res://assets/fonts/LineGapSans-Regular.ttf"
 const UI_TEXT := {
@@ -45,8 +54,15 @@ const UI_TEXT := {
 		"music_on": "音乐：开", "music_off": "音乐：关",
 		"settings": "设置", "background_music": "背景音乐", "language": "语言",
 		"settings_hint": "音乐开关不影响音效", "close_settings": "关闭 / ESC",
+		"joystick": "移动轮盘", "joystick_fixed": "固定轮盘", "joystick_follow": "跟随轮盘",
+		"mobile_start": "开始游戏", "mobile_restart": "重新开始", "mobile_resume": "继续游戏",
+		"mobile_close": "关闭", "mobile_dash": "冲刺",
 		"super_dash": "超级冲刺 %.1f 秒", "super_progress": "超级冲刺 %d/%d",
-		"protection": "保护壳 %.1f 秒"
+		"protection": "保护壳 %.1f 秒",
+		"music_mode": "音乐模式", "normal_mode": "普通模式", "wave_controls": "左键 / 空格  波纹",
+		"wave": "波纹", "beat_wait": "等待下一拍", "beat_hit": "合拍", "beat_miss": "未合拍",
+		"super_music": "超级共振 %.1f 秒", "music_progress": "超级共振 %d/%d",
+		"mode_hint": "切换模式会重开本局", "music_hint": "踩拍释放波纹 · 虚化后可击碎"
 	},
 	"en": {
 		"name": "LINE GAP", "title": "LINE GAP", "broken": "BROKEN", "score": "SCORE",
@@ -60,8 +76,15 @@ const UI_TEXT := {
 		"music_on": "Music: On", "music_off": "Music: Off",
 		"settings": "Settings", "background_music": "Background music", "language": "Language",
 		"settings_hint": "Sound effects remain enabled", "close_settings": "Close / Esc",
+		"joystick": "Joystick", "joystick_fixed": "Fixed", "joystick_follow": "Following",
+		"mobile_start": "Start game", "mobile_restart": "Play again", "mobile_resume": "Resume",
+		"mobile_close": "Close", "mobile_dash": "Dash",
 		"super_dash": "Super dash %.1fs", "super_progress": "Super dash %d/%d",
-		"protection": "Shield %.1fs"
+		"protection": "Shield %.1fs",
+		"music_mode": "Music mode", "normal_mode": "Normal mode", "wave_controls": "LMB / Space  Wave",
+		"wave": "Wave", "beat_wait": "Next beat", "beat_hit": "On beat", "beat_miss": "Off beat",
+		"super_music": "Resonance %.1fs", "music_progress": "Resonance %d/%d",
+		"mode_hint": "Switching mode restarts this run", "music_hint": "On-beat waves shatter phased lines"
 	}
 }
 
@@ -69,7 +92,8 @@ enum Phase { READY, PLAYING, PAUSED, DEAD }
 enum LineKind { HORIZONTAL, VERTICAL, ROTATING }
 
 var phase: Phase = Phase.READY
-var player := ARENA.get_center()
+var arena_rect := ARENA
+var player := arena_rect.get_center()
 var velocity := Vector2.ZERO
 var obstacles: Array[Dictionary] = []
 var sparks: Array[Dictionary] = []
@@ -117,15 +141,38 @@ var background_layer: Node2D
 var grid_dots: MultiMesh
 var language := "zh"
 var music_enabled := true
+var music_mode := false
+var music_clock = MusicClock.new()
+var music_wave_ready := true
+var music_wave_used_beat := -2
+var music_wave_buffered_beat := -1
+var music_ghost_remaining := 0.0
+var music_waves: Array[Dictionary] = []
+var music_feedback := ""
+var music_feedback_remaining := 0.0
+var music_output_latency := 0.0
+var music_wave_layer: Node2D
 var music_player: AudioStreamPlayer
 var web_audio
 var web_sound_names: Dictionary = {}
 var settings_open := false
 var settings_resume_playing := false
+var mobile_ui := OS.has_feature("android") or "mobile-preview" in OS.get_cmdline_user_args()
+var touch_controls = MobileControls.new()
+var mobile_text_labels: Array[Label] = []
+var mobile_text_cursor := 0
+var mobile_overlay_text := false
 
 
 func _ready() -> void:
-	if OS.has_feature("web"):
+	if mobile_ui:
+		get_tree().quit_on_go_back = false
+		get_window().content_scale_size = Vector2i(1440, 810)
+		get_window().content_scale_aspect = Window.CONTENT_SCALE_ASPECT_EXPAND
+		get_viewport().size_changed.connect(_layout_mobile)
+		_layout_mobile()
+		Input.emulate_mouse_from_touch = false
+	if OS.has_feature("web") or mobile_ui:
 		font = load(WEB_FONT_PATH)
 	else:
 		var system_font := SystemFont.new()
@@ -140,36 +187,45 @@ func _ready() -> void:
 	background_layer.draw.connect(_draw_background)
 	add_child(background_layer)
 	ripple_clip = Control.new()
-	ripple_clip.position = ARENA.position + Vector2(3, 3)
-	ripple_clip.size = ARENA.size - Vector2(6, 6)
+	ripple_clip.position = arena_rect.position + Vector2(3, 3)
+	ripple_clip.size = arena_rect.size - Vector2(6, 6)
 	ripple_clip.clip_contents = true
 	ripple_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(ripple_clip)
 	dash_ripple.position = -ripple_clip.position
+	dash_ripple.visual_scale = _world_scale()
 	ripple_clip.add_child(dash_ripple)
 	dash_ripple.hide()
+	music_wave_layer = Node2D.new()
+	music_wave_layer.position = -ripple_clip.position
+	music_wave_layer.draw.connect(_draw_music_waves)
+	ripple_clip.add_child(music_wave_layer)
 	_load_language()
 	if not test_mode:
+		_load_mode_preference()
 		_load_record()
 		_load_music_preference()
+		_load_joystick_preference()
 		_setup_audio()
 		_setup_music()
 	queue_redraw()
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if mobile_ui and event is InputEventScreenTouch:
+		_handle_mobile_touch(event)
+		return
+	if mobile_ui and event is InputEventScreenDrag:
+		touch_controls.drag(event.index, get_global_transform_with_canvas().affine_inverse() * event.position)
+		return
+	if mobile_ui and event is InputEventMouseButton:
+		return
 	if settings_open:
 		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 			_close_settings()
 		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			var click: Vector2 = get_global_transform_with_canvas().affine_inverse() * event.position
-			if MUSIC_BUTTON.has_point(click):
-				set_music_enabled(not music_enabled)
-			elif LANGUAGE_BUTTON.has_point(click):
-				_start_music_if_enabled()
-				set_language("en" if language == "zh" else "zh")
-			elif SETTINGS_CLOSE_BUTTON.has_point(click) or SETTINGS_BUTTON.has_point(click):
-				_close_settings()
+			_handle_ui_press(click)
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		_start_music_if_enabled()
@@ -193,23 +249,317 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var click: Vector2 = get_global_transform_with_canvas().affine_inverse() * event.position
 		_start_music_if_enabled()
-		if SETTINGS_BUTTON.has_point(click):
-			_open_settings()
+		if _handle_ui_press(click):
 			return
 		if phase == Phase.PLAYING:
 			var aim: Vector2 = click - player
 			if not aim.is_zero_approx():
 				try_dash(aim)
-		elif Rect2(410, 468, 260, 54).has_point(click):
-			if phase == Phase.READY or phase == Phase.DEAD:
-				begin_run()
-			elif phase == Phase.PAUSED:
-				_reset_movement_input()
-				phase = Phase.PLAYING
+
+
+func _handle_ui_press(at: Vector2) -> bool:
+	if settings_open:
+		if _music_button().has_point(at):
+			set_music_enabled(not music_enabled)
+		elif _language_button().has_point(at):
+			_start_music_if_enabled()
+			set_language("en" if language == "zh" else "zh")
+		elif mobile_ui and _joystick_button().has_point(at):
+			set_joystick_following(not touch_controls.following)
+		elif _settings_close_button().has_point(at) or _settings_button().has_point(at):
+			_close_settings()
+		return true
+	if _settings_button().has_point(at):
+		_open_settings()
+		return true
+	if _music_mode_button().has_point(at):
+		set_music_mode(not music_mode)
+		return true
+	if music_mode and phase == Phase.PLAYING and Rect2(420, 654, 226, 45).has_point(at):
+		try_dash()
+		return true
+	if phase != Phase.PLAYING and _primary_button().has_point(at):
+		if phase == Phase.READY or phase == Phase.DEAD:
+			begin_run()
+		elif phase == Phase.PAUSED:
+			_reset_movement_input()
+			phase = Phase.PLAYING
+		return true
+	return false
+
+
+func _handle_mobile_touch(event: InputEventScreenTouch) -> void:
+	if not event.pressed or event.canceled:
+		touch_controls.release(event.index)
+		return
+	var at: Vector2 = get_global_transform_with_canvas().affine_inverse() * event.position
+	_start_music_if_enabled()
+	if _handle_ui_press(at) or phase != Phase.PLAYING:
+		return
+	if touch_controls.press(event.index, at) == "dash":
+		try_dash(_movement_input())
+
+
+func _layout_mobile() -> void:
+	if not mobile_ui:
+		return
+	var view_size := get_viewport_rect().size
+	position = (view_size - Vector2(1080, 720)) * 0.5
+	var view := Rect2(-position, view_size)
+	var safe := view
+	if OS.has_feature("android"):
+		var display_safe := DisplayServer.get_display_safe_area()
+		var inverse := get_viewport().get_screen_transform().affine_inverse()
+		var safe_start := inverse * Vector2(display_safe.position) - position
+		var safe_end := inverse * Vector2(display_safe.end) - position
+		if safe_end.x > safe_start.x and safe_end.y > safe_start.y:
+			safe = view.intersection(Rect2(safe_start, safe_end - safe_start))
+	arena_rect = safe.grow(-16)
+	touch_controls.configure(view, safe, arena_rect)
+	player = _clamp_player(player)
+	if ripple_clip != null:
+		ripple_clip.position = arena_rect.position
+		ripple_clip.size = arena_rect.size
+	if grid_dots != null:
+		_build_grid()
+	if background_layer != null:
+		background_layer.queue_redraw()
+	velocity = Vector2.ZERO
+
+
+func _settings_button() -> Rect2:
+	if mobile_ui:
+		var inset := _mobile_header_inset()
+		return Rect2(touch_controls.safe_bounds.end.x - inset - 184, touch_controls.safe_bounds.position.y + 24, 184, 72)
+	return SETTINGS_BUTTON
+
+
+func _mobile_header_inset() -> float:
+	return clampf(touch_controls.safe_bounds.size.x * 0.055, 64, 108)
+
+
+func _music_mode_button() -> Rect2:
+	if mobile_ui:
+		var settings := _settings_button()
+		return Rect2(settings.position + Vector2(-32, 86), Vector2(216, 64))
+	return MUSIC_MODE_BUTTON
+
+
+func _load_mode_preference(path: String = SAVE_PATH) -> void:
+	var config := ConfigFile.new()
+	music_mode = config.load(path) == OK and bool(config.get_value("settings", "music_mode", false))
+
+
+func _save_mode_preference(path: String = SAVE_PATH) -> void:
+	var config := ConfigFile.new()
+	config.load(path)
+	config.set_value("settings", "music_mode", music_mode)
+	config.save(path)
+
+
+func set_music_mode(enabled: bool) -> void:
+	if music_mode == enabled:
+		return
+	var restart := phase != Phase.READY
+	music_mode = enabled
+	if not test_mode:
+		_save_mode_preference()
+		_load_record()
+	if restart:
+		begin_run()
+	else:
+		_reset_music_run()
+	_sync_music_transport()
+	if background_layer != null:
+		background_layer.queue_redraw()
+	queue_redraw()
+
+
+func _reset_music_run() -> void:
+	music_clock.reset(_music_position())
+	music_clock.update(_music_position())
+	music_wave_ready = true
+	music_wave_used_beat = -2
+	music_wave_buffered_beat = -1
+	music_ghost_remaining = 0.0
+	music_waves.clear()
+	music_feedback = ""
+	music_feedback_remaining = 0.0
+
+
+func _music_position() -> float:
+	if web_audio != null:
+		return float(web_audio.position())
+	if music_player != null and music_player.playing:
+		return maxf(0.0, music_player.get_playback_position() + AudioServer.get_time_since_last_mix() - music_output_latency)
+	return music_clock.position
+
+
+func _sync_music_transport() -> void:
+	var paused := music_mode and (phase == Phase.PAUSED or settings_open)
+	if web_audio != null:
+		web_audio.setRhythmMode(music_mode)
+		web_audio.setPaused(paused)
+	if music_player != null:
+		music_player.volume_db = -3.0 if music_enabled else -80.0
+		if music_mode:
+			music_player.stream_paused = paused
+			if not paused and not music_player.playing:
+				music_player.play()
+		elif not music_enabled:
+			music_player.stream_paused = true
+		else:
+			music_player.stream_paused = false
+
+
+func _update_music_beat(delta: float) -> void:
+	if not music_mode or phase == Phase.PAUSED or settings_open:
+		return
+	var at := _music_position()
+	if test_mode and music_player == null and web_audio == null:
+		at = music_clock.position + delta
+	if music_clock.update(at):
+		if phase == Phase.PLAYING:
+			_on_music_beat()
+	if background_layer != null:
+		background_layer.queue_redraw()
+
+
+func _on_music_beat() -> void:
+	if music_clock.beat_index > music_wave_used_beat:
+		music_wave_ready = true
+	if music_wave_buffered_beat >= 0:
+		var buffered := music_wave_buffered_beat
+		music_wave_buffered_beat = -1
+		# A stalled frame may skip the target beat; do not release stale inputs.
+		if buffered == music_clock.beat_index and music_wave_ready and music_clock.on_beat():
+			_emit_music_wave(true, music_clock.beat_index)
+	if super_dash_active:
+		_emit_ring(player, GOLD, 95.0)
+		for index in range(obstacles.size() - 1, -1, -1):
+			var ends := obstacle_endpoints(obstacles[index])
+			var visible := _clip_to_arena(ends[0], ends[1])
+			var impact := (ends[0] + ends[1]) * 0.5 if visible.is_empty() else (visible[0] + visible[1]) * 0.5
+			_shatter_obstacle(index, ends, impact)
+
+
+func _music_wave_radius() -> float:
+	return MUSIC_WAVE_RADII[clampi(lives - 1, 0, 2)] * (1.5 if mobile_ui else 1.0)
+
+
+func _try_music_wave() -> bool:
+	_update_music_beat(0.0)
+	if not music_wave_ready:
+		var next_beat: int = music_clock.beat_index + 1
+		if music_wave_buffered_beat < 0 and next_beat > music_wave_used_beat and music_clock.time_to_next_beat() <= MUSIC_INPUT_BUFFER + 0.000001:
+			music_wave_buffered_beat = next_beat
+			return true
+		return false
+	var aligned: bool = music_clock.on_beat()
+	_emit_music_wave(aligned, music_clock.nearest_beat() if aligned else music_clock.beat_index)
+	return true
+
+
+func _emit_music_wave(aligned: bool, used_beat: int) -> void:
+	music_wave_ready = false
+	music_wave_used_beat = used_beat
+	music_wave_buffered_beat = -1
+	music_feedback = "beat_hit" if aligned else "beat_miss"
+	music_feedback_remaining = 0.45
+	if aligned:
+		music_ghost_remaining = MUSIC_WAVE_DURATION + 0.05
+		for item in obstacles:
+			item["ghost_remaining"] = maxf(float(item.get("ghost_remaining", 0.0)), music_ghost_remaining)
+	music_waves.append({"position": player, "age": 0.0, "previous_radius": 0.0,
+		"radius": 0.0, "limit": _music_wave_radius(), "aligned": aligned})
+
+
+func _advance_music_waves(delta: float) -> void:
+	music_ghost_remaining = maxf(0.0, music_ghost_remaining - delta)
+	music_feedback_remaining = maxf(0.0, music_feedback_remaining - delta)
+	for index in range(music_waves.size() - 1, -1, -1):
+		var wave := music_waves[index]
+		if wave["age"] >= MUSIC_WAVE_DURATION:
+			music_waves.remove_at(index)
+			continue
+		wave["previous_radius"] = wave["radius"]
+		wave["age"] += delta
+		var progress := minf(1.0, float(wave["age"]) / MUSIC_WAVE_DURATION)
+		wave["radius"] = float(wave["limit"]) * (1.0 - pow(1.0 - progress, 2.0))
+
+
+func _music_wave_impact(before: PackedVector2Array, after: PackedVector2Array) -> Vector2:
+	for wave in music_waves:
+		var center: Vector2 = wave["position"]
+		for sample in range(3):
+			var fraction := sample * 0.5
+			var a := before[0].lerp(after[0], fraction)
+			var b := before[1].lerp(after[1], fraction)
+			var closest := Geometry2D.get_closest_point_to_segment(center, a, b)
+			var farthest := maxf(center.distance_to(a), center.distance_to(b))
+			if center.distance_to(closest) <= float(wave["radius"]) + 3.0 and farthest >= float(wave["previous_radius"]) - 3.0:
+				return closest
+	return Vector2.INF
+
+
+func _best_record_label() -> String:
+	return "%05d / %03d / %.1f%s" % [best, best_broken, best_time, ui_text("seconds")]
+
+
+func _best_record_font_size() -> int:
+	var size := 22
+	while size > 11 and font.get_string_size(_best_record_label(), HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > RECORD_LABEL_WIDTH:
+		size -= 1
+	return size
+
+
+func _music_button() -> Rect2:
+	if mobile_ui:
+		var panel := _mobile_settings_panel()
+		return Rect2(panel.end.x - 408, panel.position.y + 145, 360, 82)
+	return MUSIC_BUTTON
+
+
+func _language_button() -> Rect2:
+	if mobile_ui:
+		var panel := _mobile_settings_panel()
+		return Rect2(panel.end.x - 408, panel.position.y + 285, 360, 82)
+	return LANGUAGE_BUTTON
+
+
+func _settings_close_button() -> Rect2:
+	if mobile_ui:
+		var panel := _mobile_settings_panel()
+		return Rect2(panel.get_center().x - 220, panel.end.y - 108, 440, 84)
+	return SETTINGS_CLOSE_BUTTON
+
+
+func _joystick_button() -> Rect2:
+	var panel := _mobile_settings_panel()
+	return Rect2(panel.end.x - 408, panel.position.y + 397, 360, 82)
+
+
+func _mobile_settings_panel() -> Rect2:
+	var safe: Rect2 = touch_controls.safe_bounds
+	var size := Vector2(minf(1080, safe.size.x - 96), minf(620, safe.size.y - 160))
+	return Rect2(safe.get_center() - size * 0.5, size)
+
+
+func _primary_button() -> Rect2:
+	if mobile_ui:
+		var center: Vector2 = touch_controls.safe_bounds.get_center()
+		return Rect2(center + Vector2(-260, 130 if phase == Phase.DEAD else 90), Vector2(520, 96))
+	return Rect2(410, 468, 260, 54)
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST and mobile_ui:
+		if settings_open:
+			_close_settings()
+		elif phase == Phase.PLAYING:
+			_reset_movement_input()
+			phase = Phase.PAUSED
+	elif what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED:
 		settings_resume_playing = false
 		_reset_movement_input()
 		if phase == Phase.PLAYING:
@@ -219,6 +569,8 @@ func _notification(what: int) -> void:
 
 
 func _reset_movement_input() -> void:
+	music_wave_buffered_beat = -1
+	touch_controls.reset()
 	# A key released outside the canvas/window may never deliver its key-up event.
 	for code in MOVE_KEYS:
 		if Input.is_physical_key_pressed(code):
@@ -258,7 +610,7 @@ func begin_run() -> void:
 	settings_resume_playing = false
 	_reset_movement_input()
 	phase = Phase.PLAYING
-	player = ARENA.get_center()
+	player = arena_rect.get_center()
 	velocity = Vector2.ZERO
 	obstacles.clear()
 	sparks.clear()
@@ -290,9 +642,13 @@ func begin_run() -> void:
 	dash_direction = Vector2.UP
 	last_move_direction = Vector2.UP
 	_emit_ring(player, CYAN, 36.0)
+	_reset_music_run()
+	_sync_music_transport()
 
 
 func _movement_input() -> Vector2:
+	if mobile_ui:
+		return touch_controls.direction
 	return Vector2(
 		float(Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT)) - float(Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT)),
 		float(Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN)) - float(Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP))
@@ -302,6 +658,8 @@ func _movement_input() -> Vector2:
 func try_dash(direction: Vector2 = Vector2.ZERO) -> bool:
 	if phase != Phase.PLAYING:
 		return false
+	if music_mode:
+		return _try_music_wave()
 	if super_dash_active and dash_remaining > 0:
 		dash_direction = direction.normalized() if not direction.is_zero_approx() else last_move_direction
 		last_move_direction = dash_direction
@@ -318,7 +676,7 @@ func try_dash(direction: Vector2 = Vector2.ZERO) -> bool:
 
 
 func _begin_super_dash() -> void:
-	if not super_dash_active and dash_remaining <= 0:
+	if not music_mode and not super_dash_active and dash_remaining <= 0:
 		velocity *= SUPER_MOVE_MULTIPLIER
 	super_dash_active = true
 	super_dash_remaining = SUPER_DASH_DURATION
@@ -335,22 +693,28 @@ func _end_super_dash(protection_elapsed: float = 0.0) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	_sync_music_transport()
 	if phase == Phase.PAUSED or settings_open:
 		dash_ripple.hide()
+		music_wave_layer.hide()
 		return
 	visual_time += delta
+	_update_music_beat(delta)
 	_update_effects(delta)
 	if phase == Phase.PLAYING:
 		advance_game(delta, _movement_input())
 	elif phase == Phase.DEAD:
 		death_age += delta
 	dash_ripple.visible = phase == Phase.PLAYING
+	music_wave_layer.visible = music_mode and phase == Phase.PLAYING
 
 
 func _process(_delta: float) -> void:
 	# Submit custom geometry once per displayed frame, not once per physics catch-up step.
 	queue_redraw()
+	_sync_music_transport()
 	dash_ripple.queue_redraw()
+	music_wave_layer.queue_redraw()
 
 
 func _update_score() -> void:
@@ -358,6 +722,8 @@ func _update_score() -> void:
 
 
 func advance_game(delta: float, direction: Vector2) -> void:
+	if music_mode:
+		_advance_music_waves(delta)
 	elapsed += delta
 	hit_grace = maxf(0.0, hit_grace - delta)
 	_update_score()
@@ -367,13 +733,13 @@ func advance_game(delta: float, direction: Vector2) -> void:
 	var dash_time := minf(delta, dash_remaining)
 	var dash_end_player := player
 	dash_cooldown_remaining = maxf(0, dash_cooldown_remaining - delta)
-	var move_direction := direction.normalized()
+	var move_direction := direction.limit_length(1.0) if mobile_ui else direction.normalized()
 	if not move_direction.is_zero_approx():
-		last_move_direction = move_direction
+		last_move_direction = move_direction.normalized()
 		if super_dash_active and dash_remaining > 0:
-			dash_direction = move_direction
+			dash_direction = move_direction.normalized()
 	var normal_time := delta
-	var super_move_time := minf(maxf(0.0, delta - dash_time), maxf(0.0, super_time - dash_time))
+	var super_move_time := 0.0 if music_mode else minf(maxf(0.0, delta - dash_time), maxf(0.0, super_time - dash_time))
 	if dash_remaining > 0:
 		velocity = dash_direction * DASH_SPEED
 		player += velocity * dash_time
@@ -417,6 +783,19 @@ func advance_game(delta: float, direction: Vector2) -> void:
 		if item["age"] >= item["warning"] and item.get("kind", LineKind.ROTATING) == LineKind.ROTATING:
 			item["angle"] += item["spin"] * delta
 		var ends := obstacle_endpoints(item)
+		if music_mode:
+			var ghost := super_dash_active or float(item["ghost_remaining"]) > 0
+			var impact := _music_wave_impact(before, ends) if ghost else Vector2.INF
+			if impact != Vector2.INF:
+				_shatter_obstacle(index, ends, impact)
+				continue
+			if not ghost and item["age"] >= item["warning"] and _path_hits_obstacle(previous_player, player, before, ends):
+				_take_hit()
+				if phase == Phase.DEAD:
+					return
+			if item["age"] > item["life"]:
+				obstacles.remove_at(index)
+			continue
 		var dash_fraction := dash_time / delta if delta > 0 else 0.0
 		var dash_ends := PackedVector2Array([before[0].lerp(ends[0], dash_fraction), before[1].lerp(ends[1], dash_fraction)])
 		if super_dash_this_frame and super_time > 0:
@@ -481,14 +860,19 @@ func _take_hit() -> void:
 
 
 func _clamp_player(at: Vector2) -> Vector2:
-	return Vector2(clampf(at.x, ARENA.position.x + 10, ARENA.end.x - 10),
-		clampf(at.y, ARENA.position.y + 10, ARENA.end.y - 10))
+	var margin := 10.0 * _world_scale()
+	return Vector2(clampf(at.x, arena_rect.position.x + margin, arena_rect.end.x - margin),
+		clampf(at.y, arena_rect.position.y + margin, arena_rect.end.y - margin))
+
+
+func _world_scale() -> float:
+	return MOBILE_WORLD_SCALE if mobile_ui else 1.0
 
 
 func _path_hits_obstacle(start: Vector2, end: Vector2, before: PackedVector2Array, after: PackedVector2Array) -> bool:
 	for sample in range(3):
 		var fraction := float(sample) * 0.5
-		if segment_distance(start, end, before[0].lerp(after[0], fraction), before[1].lerp(after[1], fraction)) <= PLAYER_RADIUS + 1.5:
+		if segment_distance(start, end, before[0].lerp(after[0], fraction), before[1].lerp(after[1], fraction)) <= (PLAYER_RADIUS + 1.5) * _world_scale():
 			return true
 	return false
 
@@ -542,7 +926,7 @@ func _shatter_obstacle(index: int, ends: PackedVector2Array, impact: Vector2) ->
 
 func _spawn_obstacle() -> void:
 	var speed := LINE_SPEED
-	var length := rng.randf_range(135.0, 245.0)
+	var length := rng.randf_range(135.0, 245.0) * _world_scale()
 	var side := rng.randi_range(0, 3)
 	var center := Vector2.ZERO
 	var travel := Vector2.ZERO
@@ -553,37 +937,41 @@ func _spawn_obstacle() -> void:
 	var rotating := elapsed > 9.0 and rng.randf() < 0.25
 	if rotating:
 		# Announced rotating bars are placed well away from the player.
-		center = Vector2(rng.randf_range(200, 880), rng.randf_range(220, 546))
-		if center.distance_to(player) < 200.0:
-			center = Vector2(1080.0 - player.x, 766.0 - player.y)
-			center.x = clampf(center.x, 190, 890)
-			center.y = clampf(center.y, 230, 536)
-			if center.distance_to(player) < 180.0:
+		length = rng.randf_range(145, 225) * _world_scale()
+		var clearance := maxf(200.0, length * 0.5 + PLAYER_RADIUS * _world_scale() + 60.0)
+		center = Vector2(rng.randf_range(arena_rect.position.x + 152, arena_rect.end.x - 152), rng.randf_range(arena_rect.position.y + 92, arena_rect.end.y - 92))
+		if center.distance_to(player) < clearance:
+			center = arena_rect.get_center() * 2.0 - player
+			center.x = clampf(center.x, arena_rect.position.x + 142, arena_rect.end.x - 142)
+			center.y = clampf(center.y, arena_rect.position.y + 102, arena_rect.end.y - 102)
+			if center.distance_to(player) < maxf(180.0, clearance - 20.0):
 				return
 		angle = rng.randf_range(0, TAU)
 		spin = rng.randf_range(0.55, 1.1) * (-1.0 if rng.randf() < 0.5 else 1.0)
-		length = rng.randf_range(145, 225)
 		warning = 1.15
 		life = 7.0
 	else:
 		match side:
 			0:
-				center = Vector2(rng.randf_range(170, 910), ARENA.position.y - 25)
+				center = Vector2(rng.randf_range(arena_rect.position.x + 122, arena_rect.end.x - 122), arena_rect.position.y - 25)
 				travel = Vector2(0, speed)
 			1:
-				center = Vector2(rng.randf_range(170, 910), ARENA.end.y + 25)
+				center = Vector2(rng.randf_range(arena_rect.position.x + 122, arena_rect.end.x - 122), arena_rect.end.y + 25)
 				travel = Vector2(0, -speed)
 			2:
-				center = Vector2(ARENA.position.x - 25, rng.randf_range(205, 560))
+				center = Vector2(arena_rect.position.x - 25, rng.randf_range(arena_rect.position.y + 77, arena_rect.end.y - 78))
 				travel = Vector2(speed, 0)
 				angle = PI / 2.0
 			3:
-				center = Vector2(ARENA.end.x + 25, rng.randf_range(205, 560))
+				center = Vector2(arena_rect.end.x + 25, rng.randf_range(arena_rect.position.y + 77, arena_rect.end.y - 78))
 				travel = Vector2(-speed, 0)
 				angle = PI / 2.0
 	var kind := LineKind.ROTATING if rotating else (LineKind.HORIZONTAL if side < 2 else LineKind.VERTICAL)
+	if mobile_ui and not rotating:
+		life = maxf(life, (arena_rect.size.x if side >= 2 else arena_rect.size.y) / speed + 2.0)
 	var item := {"center": center, "velocity": travel, "angle": angle, "kind": kind,
-		"spin": spin, "length": length, "age": 0.0, "warning": warning, "life": life}
+		"spin": spin, "length": length, "age": 0.0, "warning": warning, "life": life,
+		"ghost_remaining": music_ghost_remaining if music_mode else 0.0}
 	obstacles.append(item)
 
 
@@ -610,7 +998,7 @@ func _update_pickup(delta: float, previous_player: Vector2 = Vector2.INF) -> voi
 	if pickup_active:
 		pickup_age += delta
 		var start := player if previous_player == Vector2.INF else previous_player
-		if point_segment_distance(pickup, start, player) < 20.0:
+		if point_segment_distance(pickup, start, player) < 20.0 * _world_scale():
 			collected += 1
 			_gain_ring()
 			_update_score()
@@ -629,8 +1017,11 @@ func _update_pickup(delta: float, previous_player: Vector2 = Vector2.INF) -> voi
 		pickup_wait -= delta
 		if pickup_wait <= 0.0:
 			for attempt in range(20):
-				var candidate := Vector2(rng.randf_range(100, 980), rng.randf_range(180, 585))
+				var padding := maxf(52.0, 19.0 * _world_scale() + 8.0)
+				var candidate := Vector2(rng.randf_range(arena_rect.position.x + padding, arena_rect.end.x - padding), rng.randf_range(arena_rect.position.y + padding, arena_rect.end.y - padding - 1))
 				var safe := candidate.distance_to(player) > 85.0
+				if mobile_ui and (candidate.y < touch_controls.safe_bounds.position.y + 108 + 19 * _world_scale() or candidate.distance_to(touch_controls.fixed_center) < MobileControls.RADIUS + 19 * _world_scale() + 8 or candidate.distance_to(touch_controls.dash_center) < MobileControls.DASH_RADIUS + 19 * _world_scale() + 8):
+					safe = false
 				for item in obstacles:
 					var ends := obstacle_endpoints(item)
 					if point_segment_distance(candidate, ends[0], ends[1]) < 65.0:
@@ -647,6 +1038,7 @@ func finish_run() -> void:
 	if phase != Phase.PLAYING:
 		return
 	phase = Phase.DEAD
+	music_wave_buffered_beat = -1
 	if super_dash_active:
 		dash_remaining = 0.0
 	super_dash_active = false
@@ -671,7 +1063,7 @@ func _load_record(path: String = SAVE_PATH) -> void:
 	best = 0
 	best_broken = 0
 	best_time = 0.0
-	var section := "record"
+	var section := "music_record" if music_mode else "record"
 	if config.load(path) == OK:
 		best = int(config.get_value(section, "score", 0))
 		best_broken = int(config.get_value(section, "broken", 0))
@@ -723,6 +1115,31 @@ func _load_music_preference(path: String = SAVE_PATH) -> void:
 		music_enabled = bool(config.get_value("settings", "music_enabled", true))
 
 
+func _load_joystick_preference(path: String = SAVE_PATH) -> void:
+	var config := ConfigFile.new()
+	var following := false
+	if config.load(path) == OK:
+		following = bool(config.get_value("settings", "joystick_following", false))
+	touch_controls.set_following(following)
+
+
+func _save_joystick_preference(path: String = SAVE_PATH) -> void:
+	var config := ConfigFile.new()
+	config.load(path)
+	config.set_value("settings", "joystick_following", touch_controls.following)
+	var result := config.save(path)
+	if result != OK:
+		push_warning("Could not save joystick mode: %s" % error_string(result))
+
+
+func set_joystick_following(enabled: bool) -> void:
+	touch_controls.set_following(enabled)
+	_reset_movement_input()
+	if not test_mode:
+		_save_joystick_preference()
+	queue_redraw()
+
+
 func _save_music_preference(path: String = SAVE_PATH) -> void:
 	var config := ConfigFile.new()
 	config.load(path)
@@ -739,8 +1156,9 @@ func set_music_enabled(enabled: bool) -> void:
 	if music_player != null:
 		if music_enabled:
 			_start_music_if_enabled()
-		else:
+		elif not music_mode:
 			music_player.stream_paused = true
+	_sync_music_transport()
 	if not test_mode:
 		_save_music_preference()
 	queue_redraw()
@@ -761,6 +1179,7 @@ func _setup_music(autoplay: bool = true) -> void:
 	stream.loop_offset = 0.0
 	music_player.stream = stream
 	music_player.volume_db = -3.0
+	music_output_latency = AudioServer.get_output_latency()
 	# If a playback backend reports an end, continue while the user's switch is on.
 	music_player.finished.connect(_start_music_if_enabled)
 	# Use its own player on Master; the SFX bus and its limiter stay independent.
@@ -770,11 +1189,13 @@ func _setup_music(autoplay: bool = true) -> void:
 
 
 func _start_music_if_enabled() -> void:
+	if music_mode and (phase == Phase.PAUSED or settings_open):
+		return
 	if web_audio != null:
-		if music_enabled:
+		if music_enabled or music_mode:
 			web_audio.startMusic()
 		return
-	if music_player == null or not music_enabled:
+	if music_player == null or (not music_enabled and not music_mode):
 		return
 	music_player.stream_paused = false
 	if not music_player.playing:
@@ -784,7 +1205,7 @@ func _start_music_if_enabled() -> void:
 func _save_record(path: String = SAVE_PATH) -> void:
 	var config := ConfigFile.new()
 	config.load(path)
-	var section := "record"
+	var section := "music_record" if music_mode else "record"
 	config.set_value(section, "score", best)
 	config.set_value(section, "broken", best_broken)
 	config.set_value(section, "seconds", best_time)
@@ -942,7 +1363,10 @@ func _play_sound(stream: AudioStreamWAV) -> void:
 
 
 func _draw() -> void:
-	_draw_header()
+	mobile_text_cursor = 0
+	mobile_overlay_text = false
+	if not mobile_ui:
+		_draw_header()
 	var offset := Vector2(sin(visual_time * 71.0), cos(visual_time * 59.0)) * shake
 	draw_set_transform(offset)
 	if phase == Phase.READY:
@@ -951,10 +1375,14 @@ func _draw() -> void:
 		_draw_world()
 	draw_set_transform(Vector2.ZERO)
 	_draw_footer()
+	if mobile_ui:
+		_draw_mobile_header()
 	if settings_open:
 		_draw_settings()
 	elif phase == Phase.READY or phase == Phase.PAUSED or (phase == Phase.DEAD and death_age > 0.4):
 		_draw_overlay()
+	for index in range(mobile_text_cursor, mobile_text_labels.size()):
+		mobile_text_labels[index].hide()
 
 
 func _build_grid() -> void:
@@ -971,8 +1399,8 @@ func _build_grid() -> void:
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	var positions := PackedVector2Array()
-	for x in range(72, 1030, 28):
-		for y in range(150, 628, 28):
+	for x in range(int(arena_rect.position.x + 24), int(arena_rect.end.x - 2), 28):
+		for y in range(int(arena_rect.position.y + 22), int(arena_rect.end.y - 10), 28):
 			positions.append(Vector2(x, y))
 	grid_dots = MultiMesh.new()
 	grid_dots.transform_format = MultiMesh.TRANSFORM_2D
@@ -985,11 +1413,17 @@ func _build_grid() -> void:
 
 
 func _draw_background() -> void:
-	background_layer.draw_rect(Rect2(0, 0, 1080, 720), BACKGROUND)
-	background_layer.draw_rect(ARENA, ARENA_BACKGROUND)
+	background_layer.draw_rect(touch_controls.view_bounds if mobile_ui else Rect2(0, 0, 1080, 720), BACKGROUND)
+	background_layer.draw_rect(arena_rect, ARENA_BACKGROUND)
 	background_layer.draw_multimesh(grid_dots, null)
-	background_layer.draw_rect(ARENA, Color(0.55, 0.59, 0.62, 0.2), false, 1.0)
-	for corner in [ARENA.position, Vector2(ARENA.end.x, ARENA.position.y), ARENA.end, Vector2(ARENA.position.x, ARENA.end.y)]:
+	if music_mode:
+		var pulse: float = music_clock.pulse
+		background_layer.draw_rect(arena_rect, CYAN * Color(1, 1, 1, pulse * 0.018))
+		background_layer.draw_rect(arena_rect.grow(-2), CYAN * Color(1, 1, 1, 0.12 + pulse * 0.30), false, 1.0 + pulse)
+	if mobile_ui:
+		return
+	background_layer.draw_rect(arena_rect, Color(0.55, 0.59, 0.62, 0.2), false, 1.0)
+	for corner in [arena_rect.position, Vector2(arena_rect.end.x, arena_rect.position.y), arena_rect.end, Vector2(arena_rect.position.x, arena_rect.end.y)]:
 		var sx := 1.0 if corner.x < 540 else -1.0
 		var sy := 1.0 if corner.y < 383 else -1.0
 		background_layer.draw_line(corner, corner + Vector2(20 * sx, 0), CYAN * Color(1, 1, 1, 0.32), 1.5, true)
@@ -1020,11 +1454,32 @@ func _draw_header() -> void:
 	_text(ui_text("survived"), Vector2(620, 36), 12, MUTED)
 	_text("%04.1f" % elapsed, Vector2(620, 77), 32, WHITE)
 	_text(ui_text("seconds"), Vector2(714, 76), 13, MUTED)
-	_text(ui_text("best"), Vector2(842, 36), 12, MUTED)
-	_text(ui_text("score"), Vector2(842, 62), 11, MUTED)
-	_text("%05d" % best, Vector2(898, 65), 23, GOLD)
-	_text(ui_text("broken"), Vector2(842, 89), 11, MUTED)
-	_text("%03d" % best_broken, Vector2(898, 91), 20, GOLD)
+	_text(ui_text("best"), Vector2(768, 36), 12, MUTED)
+	_text(_best_record_label(), Vector2(768, 77), _best_record_font_size(), GOLD)
+
+
+func _draw_mobile_header() -> void:
+	var safe: Rect2 = touch_controls.safe_bounds
+	var inset := _mobile_header_inset()
+	var at := safe.position + Vector2(inset, 40)
+	var width := safe.size.x - inset * 2 - 216
+	_text(ui_text("name"), at + Vector2(0, 16), 30, WHITE)
+	for index in MAX_LIVES:
+		var dot := at + Vector2(8 + index * 24, 42)
+		var color := CYAN if index == 0 else GOLD
+		draw_circle(dot, 4, color if index < lives else SEPARATOR)
+	var broken_at := at + Vector2(width * 0.16, 0)
+	_text(ui_text("broken"), broken_at, 18, MUTED)
+	_text("%03d" % broken_obstacles, broken_at + Vector2(0, 42), 40, WHITE)
+	var score_at := at + Vector2(width * 0.30, 0)
+	_text(ui_text("score"), score_at, 18, MUTED)
+	_text("%05d" % score, score_at + Vector2(0, 42), 40, CYAN)
+	var time_at := at + Vector2(width * 0.44, 0)
+	_text(ui_text("survived"), time_at, 18, MUTED)
+	_text("%.1f" % elapsed, time_at + Vector2(0, 42), 40, WHITE)
+	var best_at := at + Vector2(width * 0.61, 0)
+	_text(ui_text("best"), best_at, 16, MUTED)
+	_text(_best_record_label(), best_at + Vector2(0, 42), 32, GOLD)
 
 
 func _draw_demo() -> void:
@@ -1042,49 +1497,54 @@ func _draw_demo() -> void:
 
 
 func _draw_world() -> void:
+	var world_scale := _world_scale()
 	# Clip moving barriers to the arena so they never cross the HUD.
 	for item in obstacles:
 		var ends := obstacle_endpoints(item)
 		var clipped := _clip_to_arena(ends[0], ends[1])
 		if clipped.is_empty():
 			continue
-		var ghost: bool = float(item.get("ghost_remaining", 0.0)) > 0
+		var ghost: bool = float(item.get("ghost_remaining", 0.0)) > 0 or (music_mode and super_dash_active)
 		var active: bool = item["age"] >= item["warning"] and not ghost
 		var color := WHITE if active else Color(1, 0.83, 0.54, 0.55 + 0.2 * sin(visual_time * 18))
+		if music_mode and ghost:
+			color = (GOLD if super_dash_active else CYAN) * Color(1, 1, 1, 0.48 + music_clock.pulse * 0.3)
 		if active:
-			draw_line(clipped[0], clipped[1], WHITE * Color(1, 1, 1, 0.065), 8.0, true)
-			draw_line(clipped[0], clipped[1], color, 2.5, true)
+			draw_line(clipped[0], clipped[1], WHITE * Color(1, 1, 1, 0.065), 8.0 * world_scale, true)
+			draw_line(clipped[0], clipped[1], color, 2.5 * world_scale, true)
 		else:
-			draw_dashed_line(clipped[0], clipped[1], color, 1.5, 7, true, true)
+			draw_dashed_line(clipped[0], clipped[1], color, 1.5 * world_scale, 7 * world_scale, true, true)
 		for endpoint in ends:
-			if ARENA.has_point(endpoint):
-				draw_circle(endpoint, 3.0 if active else 2.0, color)
-		if absf(item["spin"]) > 0.01 and ARENA.has_point(item["center"]):
-			draw_circle(item["center"], 3.0, color)
+			if arena_rect.has_point(endpoint):
+				draw_circle(endpoint, (3.0 if active else 2.0) * world_scale, color)
+		if absf(item["spin"]) > 0.01 and arena_rect.has_point(item["center"]):
+			draw_circle(item["center"], 3.0 * world_scale, color)
 	if pickup_active:
 		var alpha := 1.0 if pickup_age < 7.0 else 0.5 + 0.5 * sin(visual_time * 15)
 		var tint := GOLD * Color(1, 1, 1, alpha)
-		draw_arc(pickup, 12 + sin(visual_time * 4) * 2, 0, TAU, 40, tint * Color(1, 1, 1, 0.4), 1, true)
-		draw_circle(pickup, 4.0, tint, true, -1, true)
-		draw_line(pickup + Vector2(-19, 0), pickup + Vector2(-15, 0), tint, 1, true)
-		draw_line(pickup + Vector2(15, 0), pickup + Vector2(19, 0), tint, 1, true)
+		var breath: float = music_clock.pulse * 4.0 if music_mode else sin(visual_time * 4) * 2
+		draw_arc(pickup, (12 + breath) * world_scale, 0, TAU, 40, tint * Color(1, 1, 1, 0.4), world_scale, true)
+		draw_circle(pickup, 4.0 * world_scale, tint, true, -1, true)
+		draw_line(pickup + Vector2(-19, 0) * world_scale, pickup + Vector2(-15, 0) * world_scale, tint, world_scale, true)
+		draw_line(pickup + Vector2(15, 0) * world_scale, pickup + Vector2(19, 0) * world_scale, tint, world_scale, true)
 	if phase != Phase.DEAD:
 		var trail_color := GOLD if super_dash_active else CYAN
 		for index in range(1, trail.size()):
 			var alpha := (1.0 - float(index) / trail.size()) * 0.32
-			draw_line(trail[index - 1], trail[index], trail_color * Color(1, 1, 1, alpha), 3 if dash_remaining > 0 else 2, true)
+			draw_line(trail[index - 1], trail[index], trail_color * Color(1, 1, 1, alpha), (3 if dash_remaining > 0 else 2) * world_scale, true)
 		if lives >= 2:
-			_draw_gold_ring(player, 17)
+			_draw_gold_ring(player, 17 * world_scale)
 		if hit_grace > 0 or super_dash_active:
-			draw_arc(player, 18 + _ring_layers() * 6, visual_time * 3, visual_time * 3 + TAU * 0.8, 48,
-				(GOLD if super_dash_active else CYAN) * Color(1, 1, 1, 0.8 if super_dash_active else 0.35 + hit_grace / HIT_GRACE * 0.45), 1.5, true)
-		draw_circle(player, 13, CYAN * Color(1, 1, 1, 0.07))
-		draw_arc(player, 11, 0, TAU, 40, CYAN * Color(1, 1, 1, 0.35), 1, true)
-		draw_circle(player, PLAYER_RADIUS, WHITE if dash_remaining > 0 else CYAN, true, -1, true)
+			draw_arc(player, (18 + _ring_layers() * 6) * world_scale, visual_time * 3, visual_time * 3 + TAU * 0.8, 48,
+				(GOLD if super_dash_active else CYAN) * Color(1, 1, 1, 0.8 if super_dash_active else 0.35 + hit_grace / HIT_GRACE * 0.45), 1.5 * world_scale, true)
+		var breath: float = music_clock.pulse if music_mode else 0.0
+		draw_circle(player, (13 + breath * 5) * world_scale, CYAN * Color(1, 1, 1, 0.07 + breath * 0.08))
+		draw_arc(player, (11 + breath * 4) * world_scale, 0, TAU, 40, CYAN * Color(1, 1, 1, 0.35 + breath * 0.35), world_scale, true)
+		draw_circle(player, PLAYER_RADIUS * world_scale, WHITE if dash_remaining > 0 else CYAN, true, -1, true)
 	for ring in rings:
 		var progress: float = ring["age"] / 0.6
-		draw_arc(ring["position"], lerpf(8, ring["radius"], 1.0 - pow(1.0 - progress, 3)), 0, TAU, 64,
-			ring["color"] * Color(1, 1, 1, (1.0 - progress) * 0.65), 1.4, true)
+		draw_arc(ring["position"], lerpf(8, ring["radius"], 1.0 - pow(1.0 - progress, 3)) * world_scale, 0, TAU, 64,
+			ring["color"] * Color(1, 1, 1, (1.0 - progress) * 0.65), 1.4 * world_scale, true)
 	var spark_points := PackedVector2Array()
 	var spark_colors := PackedColorArray()
 	for spark in sparks:
@@ -1094,10 +1554,10 @@ func _draw_world() -> void:
 		spark_points.append(at - spark["velocity"] * 0.025)
 		spark_colors.append(spark["color"] * Color(1, 1, 1, alpha))
 	if not spark_points.is_empty():
-		draw_multiline_colors(spark_points, spark_colors, 1.5, true)
+		draw_multiline_colors(spark_points, spark_colors, 1.5 * world_scale, true)
 	_draw_fragments()
 	if flash > 0.0:
-		draw_rect(ARENA, RED * Color(1, 1, 1, flash * 0.08))
+		draw_rect(arena_rect, RED * Color(1, 1, 1, flash * 0.08))
 
 
 func _draw_fragments() -> void:
@@ -1114,7 +1574,7 @@ func _draw_fragments() -> void:
 		var alpha := pow(1.0 - progress, 1.5)
 		var tint: Color = fragment["color"].lerp(WHITE, maxf(0, 1.0 - float(fragment["age"]) / 0.09) * 0.65)
 		var center: Vector2 = fragment["position"]
-		var offset := Vector2.from_angle(fragment["angle"]) * float(fragment["half_length"]) * (1.0 - progress * 0.5)
+		var offset := Vector2.from_angle(fragment["angle"]) * float(fragment["half_length"]) * (1.0 - progress * 0.5) * _world_scale()
 		var a := center - offset
 		var b := center + offset
 		if fragment["kind"] == "spark":
@@ -1130,10 +1590,10 @@ func _draw_fragments() -> void:
 			glows[bucket].append(tint * Color(1, 1, 1, alpha * 0.12))
 	for bucket in 6:
 		if not points[bucket].is_empty():
-			draw_multiline_colors(points[bucket], glows[bucket], 4.0 + bucket * 0.25, true)
+			draw_multiline_colors(points[bucket], glows[bucket], (4.0 + bucket * 0.25) * _world_scale(), true)
 	for bucket in 6:
 		if not points[bucket].is_empty():
-			draw_multiline_colors(points[bucket], colors[bucket], 1.0 + bucket * 0.25, true)
+			draw_multiline_colors(points[bucket], colors[bucket], (1.0 + bucket * 0.25) * _world_scale(), true)
 
 
 func _draw_gold_ring(at: Vector2, radius: float) -> void:
@@ -1141,9 +1601,9 @@ func _draw_gold_ring(at: Vector2, radius: float) -> void:
 		for segment in 12:
 			var start := TAU * segment / 12.0
 			draw_arc(at, radius, start, start + TAU / 12.0 * 0.55, 8,
-				GOLD * Color(1, 1, 1, 0.35), 1.0, true)
+				GOLD * Color(1, 1, 1, 0.35), _world_scale(), true)
 	else:
-		draw_arc(at, radius, 0, TAU, 64, GOLD * Color(1, 1, 1, 0.95), 1.5, true)
+		draw_arc(at, radius, 0, TAU, 64, GOLD * Color(1, 1, 1, 0.95), 1.5 * _world_scale(), true)
 
 
 func _clip_to_arena(a: Vector2, b: Vector2) -> PackedVector2Array:
@@ -1151,7 +1611,7 @@ func _clip_to_arena(a: Vector2, b: Vector2) -> PackedVector2Array:
 	var lower := 0.0
 	var upper := 1.0
 	var p := [-direction.x, direction.x, -direction.y, direction.y]
-	var q := [a.x - ARENA.position.x, ARENA.end.x - a.x, a.y - ARENA.position.y, ARENA.end.y - a.y]
+	var q := [a.x - arena_rect.position.x, arena_rect.end.x - a.x, a.y - arena_rect.position.y, arena_rect.end.y - a.y]
 	for index in 4:
 		if absf(p[index]) < 0.00001:
 			if q[index] < 0:
@@ -1168,8 +1628,14 @@ func _clip_to_arena(a: Vector2, b: Vector2) -> PackedVector2Array:
 
 
 func _draw_footer() -> void:
+	if mobile_ui:
+		_draw_mobile_controls()
+		return
 	_text(ui_text("move"), Vector2(48, 680), 13, MUTED)
 	_text(ui_text("pause_restart"), Vector2(48, 704), 11, MUTED)
+	if music_mode:
+		_draw_music_footer()
+		return
 	_text(ui_text("dash_controls"), Vector2(420, 679), 12, CYAN)
 	var dash_label := ui_text("dashing") if dash_remaining > 0 else (ui_text("ready") if dash_cooldown_remaining <= 0 else ui_text("cooldown") % dash_cooldown_remaining)
 	if super_dash_active:
@@ -1186,47 +1652,145 @@ func _draw_footer() -> void:
 	if hit_grace > 0:
 		_text(ui_text("protection") % hit_grace, Vector2(660, 713), 10, CYAN)
 	_draw_settings_button(SETTINGS_BUTTON, ui_text("settings"), CYAN)
+	_draw_mode_button()
+
+
+func _draw_mode_button() -> void:
+	_draw_settings_button(_music_mode_button(), ui_text("music_mode"), GOLD if music_mode else MUTED)
+	_text(ui_text("mode_hint"), Vector2(742, 713), 10, MUTED)
+
+
+func _draw_music_footer() -> void:
+	_text(ui_text("wave_controls"), Vector2(420, 650), 10, MUTED)
+	var ready: bool = music_wave_ready and phase == Phase.PLAYING
+	var color := (GOLD if super_dash_active else CYAN) if ready else MUTED
+	var label := ui_text("wave") + " · " + ui_text("ready" if ready else "beat_wait")
+	_draw_settings_button(Rect2(420, 654, 226, 42), label, color)
+	var progress: float = music_clock.progress()
+	draw_line(Vector2(420, 702), Vector2(646, 702), SEPARATOR, 2, true)
+	draw_line(Vector2(420, 702), Vector2(420 + 226 * progress, 702), color, 2, true)
+	draw_circle(Vector2(646, 702), 3.0 + music_clock.pulse * 3, CYAN * Color(1, 1, 1, 0.4 + music_clock.pulse * 0.6))
+	_text(ui_text("music_progress") % [collected % SUPER_DASH_ORBS, SUPER_DASH_ORBS], Vector2(420, 718), 10, MUTED)
+	if super_dash_active:
+		_text(ui_text("super_music") % super_dash_remaining, Vector2(660, 653), 12, GOLD)
+	elif music_feedback_remaining > 0:
+		_text(ui_text(music_feedback), Vector2(660, 686), 12, CYAN if music_feedback == "beat_hit" else MUTED)
+	_draw_settings_button(SETTINGS_BUTTON, ui_text("settings"), CYAN)
+	_draw_mode_button()
+
+
+func _draw_music_waves() -> void:
+	if not music_mode or phase != Phase.PLAYING or settings_open:
+		return
+	for wave in music_waves:
+		var alpha := pow(maxf(0.0, 1.0 - float(wave["age"]) / MUSIC_WAVE_DURATION), 0.65)
+		var tint := CYAN if wave["aligned"] else MUTED
+		if super_dash_active:
+			tint = GOLD
+		var at: Vector2 = wave["position"]
+		var radius: float = maxf(1.0, wave["radius"])
+		music_wave_layer.draw_arc(at, radius, 0, TAU, 128, tint * Color(1, 1, 1, alpha * 0.1), 9.0, true)
+		music_wave_layer.draw_arc(at, radius, 0, TAU, 128, tint * Color(1, 1, 1, alpha * 0.85), 2.0, true)
 
 
 func _draw_settings_button(rect: Rect2, label: String, color: Color) -> void:
 	var hover := rect.has_point(get_global_mouse_position())
 	draw_rect(rect, color * Color(1, 1, 1, 0.07 if hover else 0.025))
 	draw_rect(rect, color * Color(1, 1, 1, 0.7 if hover else 0.3), false, 1.0)
-	var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-	_text(label, rect.get_center() + Vector2(-width * 0.5, 5), 13, color)
+	var text_size := 40 if mobile_ui else 13
+	var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, text_size).x
+	_text(label, rect.get_center() + Vector2(-width * 0.5, text_size * 0.35), text_size, color)
 
 
 func _draw_settings() -> void:
-	draw_rect(ARENA.grow(-1), BACKGROUND * Color(1, 1, 1, 0.96))
+	draw_rect(arena_rect.grow(-1), BACKGROUND * Color(1, 1, 1, 0.96))
+	if mobile_ui:
+		_draw_mobile_settings()
+		return
 	var panel := Rect2(340, 222, 400, 326)
 	draw_rect(panel, BACKGROUND)
 	draw_rect(panel, CYAN * Color(1, 1, 1, 0.25), false, 1.0)
 	_center_text(ui_text("settings"), 279, 32, WHITE)
 	draw_line(Vector2(372, 299), Vector2(708, 299), SEPARATOR, 1.0)
 	_text(ui_text("background_music"), Vector2(372, 339), 16, WHITE)
-	_draw_settings_button(MUSIC_BUTTON, ui_text("music_on" if music_enabled else "music_off"), CYAN if music_enabled else MUTED)
+	_draw_settings_button(_music_button(), ui_text("music_on" if music_enabled else "music_off"), CYAN if music_enabled else MUTED)
 	_text(ui_text("settings_hint"), Vector2(372, 376), 12, MUTED)
 	_text(ui_text("language"), Vector2(372, 421), 16, WHITE)
-	_draw_settings_button(LANGUAGE_BUTTON, ui_text("switch_language"), CYAN)
-	_draw_settings_button(SETTINGS_CLOSE_BUTTON, ui_text("close_settings"), CYAN)
+	_draw_settings_button(_language_button(), ui_text("switch_language"), CYAN)
+	_draw_settings_button(_settings_close_button(), ui_text("close_settings"), CYAN)
+
+
+func _mobile_dash_ready() -> bool:
+	return phase == Phase.PLAYING and not settings_open and (super_dash_active or (dash_remaining <= 0 and dash_cooldown_remaining <= 0))
+
+
+func _draw_mobile_settings() -> void:
+	mobile_overlay_text = true
+	var panel := _mobile_settings_panel()
+	draw_rect(panel, BACKGROUND)
+	draw_rect(panel, CYAN * Color(1, 1, 1, 0.25), false, 2.0)
+	_text_at_center(ui_text("settings"), Vector2(panel.get_center().x, panel.position.y + 80), 64, WHITE)
+	draw_line(panel.position + Vector2(48, 108), Vector2(panel.end.x - 48, panel.position.y + 108), SEPARATOR, 2.0)
+	_text(ui_text("background_music"), panel.position + Vector2(48, 195), 36, WHITE)
+	_text(ui_text("settings_hint"), panel.position + Vector2(48, 250), 28, MUTED)
+	_draw_settings_button(_music_button(), ui_text("music_on" if music_enabled else "music_off"), CYAN if music_enabled else MUTED)
+	_text(ui_text("language"), panel.position + Vector2(48, 335), 36, WHITE)
+	_draw_settings_button(_language_button(), ui_text("switch_language"), CYAN)
+	_text(ui_text("joystick"), panel.position + Vector2(48, 447), 36, WHITE)
+	_draw_settings_button(_joystick_button(), ui_text("joystick_follow" if touch_controls.following else "joystick_fixed"), CYAN)
+	_draw_settings_button(_settings_close_button(), ui_text("mobile_close"), CYAN)
+	_draw_settings_button(_settings_button(), ui_text("settings"), CYAN)
+	mobile_overlay_text = false
+
+
+func _draw_mobile_controls() -> void:
+	_draw_settings_button(_settings_button(), ui_text("settings"), CYAN)
+	if phase != Phase.PLAYING or settings_open:
+		return
+	var center: Vector2 = touch_controls.center
+	var active: bool = touch_controls.move_touch != -1
+	var color := CYAN if active else MUTED
+	draw_circle(center, MobileControls.RADIUS, Color(0.02, 0.05, 0.05, 0.2))
+	draw_arc(center, MobileControls.RADIUS, 0, TAU, 80, color * Color(1, 1, 1, 0.65), 2.0 * MobileControls.CONTROL_SCALE, true)
+	draw_arc(center, MobileControls.RADIUS * MobileControls.DEAD_ZONE, 0, TAU, 32, color * Color(1, 1, 1, 0.2), MobileControls.CONTROL_SCALE, true)
+	draw_circle(center + touch_controls.knob, 24 * MobileControls.CONTROL_SCALE, color * Color(1, 1, 1, 0.18))
+	draw_arc(center + touch_controls.knob, 24 * MobileControls.CONTROL_SCALE, 0, TAU, 40, color, 2.0 * MobileControls.CONTROL_SCALE, true)
+	var dash_at: Vector2 = touch_controls.dash_center
+	var ready := _mobile_dash_ready()
+	var dash_color := (GOLD if super_dash_active else CYAN) if ready else MUTED
+	draw_circle(dash_at, MobileControls.DASH_RADIUS, Color(0.02, 0.05, 0.05, 0.25))
+	draw_arc(dash_at, MobileControls.DASH_RADIUS, 0, TAU, 80, dash_color, 2.5 * MobileControls.CONTROL_SCALE, true)
+	var label := ui_text("mobile_dash") if ready else ("%.1f" % maxf(0.1, dash_cooldown_remaining) if dash_cooldown_remaining > 0 else ui_text("dashing"))
+	_text_at_center(label, dash_at + Vector2(0, 22), 60, dash_color)
+	if super_dash_active:
+		_center_text(ui_text("super_dash") % super_dash_remaining, touch_controls.safe_bounds.end.y - 18, 28, GOLD)
+	else:
+		_center_text(ui_text("super_progress") % [collected % SUPER_DASH_ORBS, SUPER_DASH_ORBS], touch_controls.safe_bounds.end.y - 18, 26, MUTED)
+	if hit_grace > 0:
+		_text(ui_text("protection") % hit_grace, Vector2(touch_controls.safe_bounds.end.x - 280, touch_controls.safe_bounds.end.y - 18), 26, CYAN)
 
 
 func _draw_overlay() -> void:
+	if mobile_ui:
+		_draw_mobile_overlay()
+		return
 	if phase != Phase.READY:
-		draw_rect(ARENA.grow(-1), BACKGROUND * Color(1, 1, 1, 0.94))
+		draw_rect(arena_rect.grow(-1), BACKGROUND * Color(1, 1, 1, 0.94))
 	var title := ui_text("title")
-	var button := ui_text("start")
+	var button := ui_text("mobile_start" if mobile_ui else "start")
 	if phase == Phase.DEAD:
 		title = ui_text("dead")
-		button = ui_text("restart")
+		button = ui_text("mobile_restart" if mobile_ui else "restart")
 	elif phase == Phase.PAUSED:
 		title = ui_text("paused")
-		button = ui_text("resume")
+		button = ui_text("mobile_resume" if mobile_ui else "resume")
 	_center_text(title, 332 if phase == Phase.DEAD else 360, 60 if phase == Phase.READY else 42, WHITE)
 	if phase == Phase.DEAD:
 		_center_text(ui_text("stats") % [elapsed, collected, broken_obstacles], 383, 18, MUTED)
 		_center_text(ui_text("final_score") % score, 423, 15, CYAN)
-	var button_rect := Rect2(410, 468, 260, 54)
+	elif music_mode:
+		_center_text(ui_text("music_hint"), 410, 17, CYAN)
+	var button_rect := _primary_button()
 	var hover := button_rect.has_point(get_global_mouse_position())
 	draw_rect(button_rect, CYAN * Color(1, 1, 1, 0.07 if hover else 0.025))
 	draw_rect(button_rect, CYAN * Color(1, 1, 1, 0.85 if hover else 0.4), false, 1.0)
@@ -1238,7 +1802,64 @@ func _draw_overlay() -> void:
 
 
 func _text(value: String, at: Vector2, size: int, color: Color) -> void:
+	if mobile_ui:
+		# Separate text canvases keep menu glyphs independent of world geometry.
+		if mobile_text_cursor == mobile_text_labels.size():
+			var label := Label.new()
+			label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			label.z_index = 10
+			label.add_theme_font_override("font", font)
+			add_child(label)
+			mobile_text_labels.append(label)
+		var label := mobile_text_labels[mobile_text_cursor]
+		mobile_text_cursor += 1
+		label.text = value
+		if label.get_theme_font_size("font_size") != size:
+			label.add_theme_font_size_override("font_size", size)
+		var tint := color
+		if not mobile_overlay_text and (settings_open or phase == Phase.PAUSED or (phase == Phase.DEAD and death_age > 0.4)):
+			tint.a *= 0.06
+		if label.get_theme_color("font_color") != tint:
+			label.add_theme_color_override("font_color", tint)
+		label.position = at - Vector2(0, font.get_ascent(size))
+		label.size = font.get_string_size(value, HORIZONTAL_ALIGNMENT_LEFT, -1, size) + Vector2(4, font.get_height(size))
+		label.show()
+		return
 	draw_string(font, at, value, HORIZONTAL_ALIGNMENT_LEFT, -1, size, color)
+
+
+func _text_at_center(value: String, at: Vector2, size: int, color: Color) -> void:
+	var width := font.get_string_size(value, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	_text(value, at - Vector2(width * 0.5, 0), size, color)
+
+
+func _draw_mobile_overlay() -> void:
+	mobile_overlay_text = true
+	if phase != Phase.READY:
+		draw_rect(arena_rect.grow(-1), BACKGROUND * Color(1, 1, 1, 0.94))
+	var center: Vector2 = touch_controls.safe_bounds.get_center()
+	var title := ui_text("title")
+	var button := ui_text("mobile_start")
+	if phase == Phase.DEAD:
+		title = ui_text("dead")
+		button = ui_text("mobile_restart")
+		_text_at_center(ui_text("stats") % [elapsed, collected, broken_obstacles], center + Vector2(0, -35), 30, MUTED)
+		_text_at_center(ui_text("final_score") % score, center + Vector2(0, 35), 36, CYAN)
+	elif phase == Phase.PAUSED:
+		title = ui_text("paused")
+		button = ui_text("mobile_resume")
+	_text_at_center(title, center + Vector2(0, -95 if phase == Phase.DEAD else -40), 96 if phase == Phase.READY else 84, WHITE)
+	var rect := _primary_button()
+	draw_rect(rect, CYAN * Color(1, 1, 1, 0.025))
+	draw_rect(rect, CYAN * Color(1, 1, 1, 0.4), false, 2.0)
+	_text_at_center(button, rect.get_center() + Vector2(0, 15), 40, CYAN)
+	if phase == Phase.DEAD and (score > old_best or broken_obstacles > old_best_broken):
+		_text_at_center(ui_text("new_best"), center + Vector2(0, 280), 30, GOLD)
+	var credits_y: float = touch_controls.safe_bounds.end.y - 54
+	_text_at_center("Bumba Crossing — Kevin MacLeod (incompetech.com)", Vector2(center.x, credits_y), 22, MUTED)
+	_text_at_center("CC BY 4.0 · creativecommons.org/licenses/by/4.0/", Vector2(center.x, credits_y + 28), 20, MUTED)
+	_draw_settings_button(_settings_button(), ui_text("settings"), CYAN)
+	mobile_overlay_text = false
 
 
 func _center_text(value: String, baseline: float, size: int, color: Color) -> void:

@@ -7,6 +7,8 @@
   music.preload = 'metadata';
   let context, musicGain, sfxLimiter, musicMeter, sfxMeter, outputMeter;
   let enabled = false;
+  let rhythmMode = false;
+  let transportPaused = false;
   let activated = false;
   let error = '';
   const buffers = new Map();
@@ -53,7 +55,7 @@
     sfxMeter.fftSize = 2048;
     sfxLimiter.connect(sfxMeter).connect(master);
     musicGain = context.createGain();
-    musicGain.gain.value = Math.pow(10, -3 / 20);
+    musicGain.gain.value = enabled ? Math.pow(10, -3 / 20) : 0;
     musicMeter = context.createAnalyser();
     musicMeter.fftSize = 2048;
     context.createMediaElementSource(music).connect(musicGain).connect(musicMeter).connect(master);
@@ -66,7 +68,7 @@
   }
 
   function startMusic() {
-    if (!enabled || !activated) return;
+    if ((!enabled && !rhythmMode) || !activated || transportPaused) return;
     try {
       initialize();
       if (context.state === 'suspended') context.resume().catch(fail);
@@ -76,8 +78,25 @@
 
   function setMusicEnabled(value) {
     enabled = Boolean(value);
-    if (enabled) startMusic();
+    if (musicGain) musicGain.gain.value = enabled ? Math.pow(10, -3 / 20) : 0;
+    if (enabled || rhythmMode) startMusic();
     else music.pause(); // Preserve the position; sound effects have their own path.
+  }
+
+  function setRhythmMode(value) {
+    const next = Boolean(value);
+    if (rhythmMode === next) return;
+    rhythmMode = next;
+    if (enabled || rhythmMode) startMusic();
+    else music.pause();
+  }
+
+  function setPaused(value) {
+    const next = Boolean(value);
+    if (transportPaused === next) return;
+    transportPaused = next;
+    if (next) music.pause();
+    else startMusic();
   }
 
   function unlock(event) {
@@ -122,7 +141,7 @@
   }
 
   music.addEventListener('ended', () => {
-    if (enabled && activated) {
+    if ((enabled || rhythmMode) && activated && !transportPaused) {
       music.currentTime = 0;
       startMusic();
     }
@@ -131,9 +150,10 @@
   document.addEventListener('pointerdown', unlock, true);
   document.addEventListener('keydown', unlock, true);
   window.LineGapAudio = Object.freeze({
-    startMusic, setMusicEnabled, playEffect,
+    startMusic, setMusicEnabled, playEffect, setRhythmMode, setPaused,
+    position: () => music.currentTime,
     // Read-only playback information is useful when verifying browser exports.
-    status: () => ({ enabled, activated, context: context && context.state,
+    status: () => ({ enabled, rhythmMode, transportPaused, activated, context: context && context.state,
       musicPaused: music.paused, musicPosition: music.currentTime,
       musicDuration: Number.isFinite(music.duration) ? music.duration : null,
       musicLoop: music.loop, musicPeak: peak(musicMeter), sfxPeak: peak(sfxMeter), outputPeak: peak(outputMeter),

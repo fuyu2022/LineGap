@@ -6,6 +6,7 @@ const LIFETIME := 0.9
 const MAX_RIPPLES := 4
 var ripples: Array[Dictionary] = []
 var emitted_count := 0
+var visual_scale := 1.0
 
 
 func reset() -> void:
@@ -38,5 +39,5 @@ func _draw() -> void:
 	for ripple in ripples:
 		var shape := appearance(ripple)
 		var center: Vector2 = ripple["position"]
-		draw_arc(center, shape.x, 0, TAU, 128, CYAN * Color(1, 1, 1, shape.y * 0.12), 6, true)
-		draw_arc(center, shape.x, 0, TAU, 128, CYAN * Color(1, 1, 1, shape.y), 2, true)
+		draw_arc(center, shape.x * visual_scale, 0, TAU, 128, CYAN * Color(1, 1, 1, shape.y * 0.12), 6 * visual_scale, true)
+		draw_arc(center, shape.x * visual_scale, 0, TAU, 128, CYAN * Color(1, 1, 1, shape.y), 2 * visual_scale, true)

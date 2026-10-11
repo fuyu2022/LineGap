@@ -13,10 +13,11 @@ func expect(condition: bool, message: String) -> void:
 		failures.append(message)
 		printerr("FAIL: ", message)
 
-func finish(game, points: int, broken: int) -> void:
+func finish(game, points: int, broken: int, seconds: float = 0.0) -> void:
 	game.begin_run()
 	game.score = points
 	game.broken_obstacles = broken
+	game.elapsed = seconds
 	game.finish_run()
 
 func run() -> void:
@@ -24,10 +25,15 @@ func run() -> void:
 	game.test_mode = true
 	root.add_child(game)
 	game.set_physics_process(false)
+	game.set_language("zh")
 	game._load_record("user://linegap-missing-records-test.cfg")
 	expect(game.best == 0 and game.best_broken == 0, "New players start with two zero records")
-	finish(game, 700, 10)
+	finish(game, 700, 10, 31.2)
 	expect(game.best == 700 and game.best_broken == 10, "First finished run records score and shatters")
+	expect(game._best_record_label() == "00700 / 010 / 31.2秒", "Record display combines score, shatters and survival on one line")
+	game.set_language("en")
+	expect(game._best_record_label() == "00700 / 010 / 31.2s", "Record survival unit follows language")
+	game.set_language("zh")
 	finish(game, 900, 5)
 	expect(game.best == 900 and game.best_broken == 10, "A higher score cannot lower the shatter record")
 	finish(game, 500, 15)
@@ -47,7 +53,7 @@ func run() -> void:
 	game.best = 0
 	game.best_broken = 0
 	game._load_record(TEST_SAVE)
-	expect(game.best == 900 and game.best_broken == 15 and game.old_best_broken == 15, "Both records persist across save and reload")
+	expect(game.best == 900 and game.best_broken == 15 and game.old_best_broken == 15 and is_equal_approx(game.best_time, 31.2), "All three records persist across save and reload")
 	config.load(TEST_SAVE)
 	expect(config.get_value("settings", "language") == "en" and config.get_value("settings", "music_enabled") == false, "Saving records preserves language and music preferences")
 	config = ConfigFile.new()

@@ -23,6 +23,20 @@ Click the game or press Space to enable audio. Background music loops
 continuously. Music: On / Off controls only music; sound effects stay enabled.
 The music toggle preserves its playback position and saves your choice.
 Records and preferences are stored in this browser's site data (IndexedDB).
+Records display as score / barriers shattered / survival time (one decimal
+place). Each value is its own historical maximum.
+
+Music mode: Click Music mode in the bottom-right corner (gold means enabled).
+Switching modes restarts the current run. Space / left-click releases a wave
+without moving the player. On-beat waves briefly phase all obstacles; waves
+only shatter phased obstacles on contact. Each beat resets the gray wave
+button. Stages 1 / 2 / 3 increase wave range. Every seven orbs grant seven
+seconds of resonance: obstacles stay phased and shatter automatically on beat.
+Pause also pauses the music in this mode. Muting preserves the beat clock.
+Each mode saves separate records.
+On-beat judgement allows 230ms before or after a beat. While gray, a press up
+to 80ms before the next available beat is buffered once and fires on that beat.
+Repeated presses do not stack. Pause, focus loss, restart and death clear it.
 
 This single-threaded build does not require special cross-origin headers.
 For GitHub Pages, publish all files with index.html at the site root;
