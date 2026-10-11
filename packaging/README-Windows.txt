@@ -20,7 +20,7 @@ Taking damage grants two seconds of invulnerability. Best scores are saved autom
 
 Every seven orbs open a seven-second super-dash window: no dash cooldown and
 full invulnerability, including when not dashing. Press Space or left-click
-to dash manually; movement speed is 2.5 times normal during this window.
+to dash manually; movement speed is 2 times normal during this window.
 Normal movement speed returns when the window ends. Contacting any barrier
 shatters it, including while walking or standing still. Bursts can turn.
 The dash bar and trail turn gold. Finishing grants the usual

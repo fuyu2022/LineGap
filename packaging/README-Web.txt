@@ -11,7 +11,7 @@ Esc: pause/resume. R: restart. Click English / 中文 to switch language.
 
 Every seven orbs open a seven-second super-dash window: no dash cooldown and
 full invulnerability, including when not dashing. Press Space or left-click
-to dash manually; movement speed is 2.5 times normal during this window.
+to dash manually; movement speed is 2 times normal during this window.
 Normal movement speed returns when the window ends. The dash bar and
 trail turn gold. Contacting any barrier shatters it throughout the window,
 including while walking or standing still. Manual bursts can turn.

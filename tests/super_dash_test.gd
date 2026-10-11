@@ -44,9 +44,9 @@ func run() -> void:
 	var origin: Vector2 = game.player
 	game.advance_game(0.2, Vector2.ZERO)
 	expect(game.player == origin and game.dash_remaining == 0 and game.dash_ripple.emitted_count == 0, "Standing still in super mode never auto-dashes")
-	game.velocity = Vector2.LEFT * Game.PLAYER_SPEED * 2.5
+	game.velocity = Vector2.LEFT * Game.PLAYER_SPEED * 2.0
 	game.advance_game(0.02, Vector2.LEFT)
-	expect(game.player.is_equal_approx(origin + Vector2.LEFT * Game.PLAYER_SPEED * 2.5 * 0.02), "Direction keys move at 2.5 times ordinary speed without triggering a dash")
+	expect(game.player.is_equal_approx(origin + Vector2.LEFT * Game.PLAYER_SPEED * 2.0 * 0.02), "Direction keys move at twice ordinary speed without triggering a dash")
 	game.obstacles.append(barrier(game.player))
 	game.obstacles.append(barrier(game.player + Vector2(3, 0)))
 	game.velocity = Vector2.ZERO
@@ -149,11 +149,11 @@ func run() -> void:
 			game.advance_game(1.0 / 120, heading)
 		origin = game.player
 		game.advance_game(0.01, heading)
-		expect(is_equal_approx(game.player.distance_to(origin), 8.375) and game.dash_remaining == 0, "Accelerated straight and diagonal movement settles at 837.5 pixels per second")
+		expect(is_equal_approx(game.player.distance_to(origin), 6.7) and game.dash_remaining == 0, "Accelerated straight and diagonal movement settles at 670 pixels per second")
 		game.super_dash_remaining = 0.005
 		origin = game.player
 		game.advance_game(0.01, heading)
-		expect(is_equal_approx(game.player.distance_to(origin), 5.8625) and is_equal_approx(game.velocity.length(), 335.0), "Movement returns to ordinary speed at expiry, including a frame crossing the boundary")
+		expect(is_equal_approx(game.player.distance_to(origin), 5.025) and is_equal_approx(game.velocity.length(), 335.0), "Movement returns to ordinary speed at expiry, including a frame crossing the boundary")
 		origin = game.player
 		game.advance_game(0.01, heading)
 		expect(is_equal_approx(game.player.distance_to(origin), 3.35), "Ordinary movement resumes at 335 pixels per second after the window")
@@ -161,7 +161,7 @@ func run() -> void:
 		quiet_run(game)
 		collect(game, 7)
 		game.lives = 1
-		game.velocity = Vector2.RIGHT * Game.PLAYER_SPEED * 2.5
+		game.velocity = Vector2.RIGHT * Game.PLAYER_SPEED * 2.0
 		var obstacle := barrier(game.player + Vector2(70, 0))
 		if state == "warning":
 			obstacle["age"] = 0.0
@@ -182,9 +182,9 @@ func run() -> void:
 	collect(game, 7)
 	game.lives = 1
 	game.super_dash_remaining = 0.05
-	game.velocity = Vector2.RIGHT * Game.PLAYER_SPEED * 2.5
+	game.velocity = Vector2.RIGHT * Game.PLAYER_SPEED * 2.0
 	game.obstacles.append(barrier(game.player + Vector2(20, 0)))
-	game.obstacles.append(barrier(game.player + Vector2(51, 0)))
+	game.obstacles.append(barrier(game.player + Vector2(43, 0)))
 	game.advance_game(0.06, Vector2.RIGHT)
 	expect(game.broken_obstacles == 1 and game.obstacles.size() == 1 and game.lives == 1, "Ordinary contact shatters only before the exact end of the super window")
 	game.queue_free()
