@@ -54,13 +54,18 @@ func run() -> void:
 	controls.drag(4, origin + Vector2(30, 0))
 	expect(controls.center == origin and controls.direction.x > 0, "Small drag moves the knob while the following center stays stable")
 	controls.drag(4, origin + Vector2(200 * Controls.CONTROL_SCALE, 0))
-	expect(controls.center.is_equal_approx(origin + Vector2(128 * Controls.CONTROL_SCALE, 0)) and controls.direction == Vector2.RIGHT, "Long drag follows the finger while preserving full speed")
+	expect(controls.center == origin and controls.direction == Vector2.RIGHT and controls.knob.length() == Controls.RADIUS, "Long drag keeps the touchdown center anchored and clamps the knob at full speed")
 	controls.drag(4, controls.center + Vector2(-Controls.RADIUS, 0))
 	expect(controls.direction == Vector2.LEFT, "Crossing the center reverses direction immediately")
 	controls.drag(4, Vector2(1200, 600))
-	expect(controls.move_touch == 4 and controls.center.x <= controls.center_bounds.end.x, "Crossing the screen midpoint keeps ownership and bounds the following center")
+	expect(controls.move_touch == 4 and controls.center == origin, "Crossing the screen midpoint keeps ownership and the original center")
 	controls.release(4)
-	expect(controls.direction == Vector2.ZERO and controls.center == controls.fixed_center, "Release recenters and removes all movement strength")
+	expect(controls.direction == Vector2.ZERO and controls.move_touch == -1 and controls.center == origin, "Release ends the anchored gesture and waits for a new touchdown")
+	var next_origin := origin + Vector2(90, 10)
+	expect(controls.press(8, next_origin) == "move" and controls.center == next_origin and controls.direction == Vector2.ZERO, "Next touchdown establishes a new neutral center")
+	controls.drag(4, origin)
+	expect(controls.move_touch == 8 and controls.center == next_origin and controls.direction == Vector2.ZERO, "Old finger cannot move the new gesture")
+	controls.release(8)
 	controls.press(5, origin)
 	controls.set_following(false)
 	expect(controls.move_touch == -1 and controls.dash_touch == -1 and controls.direction == Vector2.ZERO, "Changing modes cancels captured fingers")
@@ -84,7 +89,7 @@ func run() -> void:
 	drag(game, 1, origin + Vector2(41.04 * Controls.CONTROL_SCALE, 0))
 	var player_before: Vector2 = game.player
 	game._physics_process(0.2)
-	expect(is_equal_approx(game.player.x - player_before.x, 33.5), "Gameplay preserves analog half speed instead of normalizing every touch")
+	expect(is_equal_approx(game.player.x - player_before.x, 50.25), "Analog half deflection uses 1.5 times the desktop base speed")
 	touch(game, 2, game.touch_controls.dash_center)
 	expect(game.dash_remaining > 0 and game.dash_direction == Vector2.RIGHT and game.touch_controls.move_touch == 1, "Dash button uses joystick heading during simultaneous movement")
 	expect(not game._mobile_dash_ready() and game.dash_cooldown_remaining > 0, "Dash button becomes inactive during cooldown")
@@ -145,7 +150,7 @@ func run() -> void:
 		var clipped: PackedVector2Array = game._clip_to_arena(Vector2(game.arena_rect.position.x - 100, game.arena_rect.get_center().y), Vector2(game.arena_rect.end.x + 100, game.arena_rect.get_center().y))
 		expect(clipped.size() == 2 and is_equal_approx(clipped[0].x, game.arena_rect.position.x) and is_equal_approx(clipped[1].x, game.arena_rect.end.x), "Obstacle clipping uses the full mobile playfield at %s" % str(size))
 	game.begin_run()
-	var barrier := PackedVector2Array([Vector2(30, -100), Vector2(30, 100)])
+	var barrier := PackedVector2Array([Vector2(22, -100), Vector2(22, 100)])
 	expect(game._path_hits_obstacle(Vector2.ZERO, Vector2.ZERO, barrier, barrier), "Visible enlarged player makes contact at the mobile radius")
 	var desktop = Game.new()
 	expect(not desktop._path_hits_obstacle(Vector2.ZERO, Vector2.ZERO, barrier, barrier), "Desktop collision radius stays unchanged")
@@ -153,20 +158,20 @@ func run() -> void:
 	desktop.rng.seed = 1234
 	game._spawn_obstacle()
 	desktop._spawn_obstacle()
-	expect(is_equal_approx(game.obstacles.back()["length"], desktop.obstacles.back()["length"] * 4.0), "Mobile barrier geometry is four times desktop size")
+	expect(is_equal_approx(game.obstacles.back()["length"], desktop.obstacles.back()["length"] * 3.0), "Mobile barrier geometry is three times desktop size")
 	desktop.dash_ripple.free()
 	desktop.free()
 	game.obstacles.clear()
-	game.pickup = game.player + Vector2(70, 0)
+	game.pickup = game.player + Vector2(50, 0)
 	game.pickup_active = true
 	game._update_pickup(0.01)
 	expect(game.collected == 1 and not game.pickup_active, "Enlarged mobile orb can be collected at its visible halo")
-	game.pickup = game.player + Vector2(81, 0)
+	game.pickup = game.player + Vector2(61, 0)
 	game.pickup_active = true
 	game._update_pickup(0.01)
 	expect(game.collected == 1 and game.pickup_active, "Orb outside the enlarged pickup range is not collected")
 	var edge: Vector2 = game._clamp_player(game.arena_rect.position)
-	expect(edge.is_equal_approx(game.arena_rect.position + Vector2(40, 40)), "Enlarged player keeps its full body inside the playfield")
+	expect(edge.is_equal_approx(game.arena_rect.position + Vector2(30, 30)), "Three-times player keeps its full body inside the playfield")
 	game.begin_run()
 	var spawned_outside_old_box := false
 	var all_pickups_safe := true
@@ -176,8 +181,92 @@ func run() -> void:
 		game._update_pickup(0.01)
 		if game.pickup_active:
 			spawned_outside_old_box = spawned_outside_old_box or not Game.ARENA.has_point(game.pickup)
-			all_pickups_safe = all_pickups_safe and game.arena_rect.has_point(game.pickup) and game.pickup.y >= game.touch_controls.safe_bounds.position.y + 184 and game.pickup.distance_to(game.touch_controls.fixed_center) >= 228 and game.pickup.distance_to(game.touch_controls.dash_center) >= 212
+			all_pickups_safe = all_pickups_safe and game.arena_rect.has_point(game.pickup) and game.pickup.y >= game.touch_controls.safe_bounds.position.y + 165 and game.pickup.distance_to(game.touch_controls.fixed_center) >= 209 and game.pickup.distance_to(game.touch_controls.dash_center) >= 193
 	expect(spawned_outside_old_box and all_pickups_safe, "Orbs use the expanded mobile playfield while avoiding HUD and touch buttons")
+	for stage in range(1, 4):
+		game.begin_run()
+		game.spawn_wait = 999
+		game.pickup_wait = 999
+		game.lives = stage
+		var start: Vector2 = game.player
+		game.try_dash(Vector2.RIGHT)
+		game.advance_game(game.dash_remaining, Vector2.ZERO)
+		expect(is_equal_approx(game.player.distance_to(start), 420 if stage == 3 else 240), "Stage %d mobile dash travels 1.5 times the desktop distance" % stage)
+	for size in [Vector2i(1440, 810), Vector2i(1920, 864), Vector2i(1280, 960)]:
+		root.size = size
+		await process_frame
+		game._layout_mobile()
+		var panel: Rect2 = game._mobile_settings_panel()
+		var buttons := [game._music_button(), game._music_mode_button(), game._language_button(), game._joystick_button(), game._settings_close_button()]
+		var fit := true
+		for index in buttons.size():
+			fit = fit and panel.encloses(buttons[index])
+			for other in range(index + 1, buttons.size()):
+				fit = fit and not buttons[index].intersects(buttons[other])
+		expect(fit, "Four settings rows and close button fit without overlap at %s" % size)
+		expect(game.world_clip.clip_contents and game.world_clip.position == game.arena_rect.position and game.world_layer.position == -game.arena_rect.position and game.music_wave_layer.position == -game.ripple_clip.position and game.dash_ripple.position == -game.ripple_clip.position, "World and effect clip transforms follow viewport size %s" % size)
+		game.begin_run()
+		game.elapsed = 20.0
+		var valid := true
+		var rotations := 0
+		for attempt in 400:
+			game.obstacles.clear()
+			game._spawn_obstacle()
+			if game.obstacles.is_empty():
+				continue
+			var item: Dictionary = game.obstacles[0]
+			if item["kind"] == Game.LineKind.ROTATING:
+				rotations += 1
+				valid = valid and absf(item["spin"]) >= 0.275 and absf(item["spin"]) <= 0.55
+				for angle_step in 24:
+					item["angle"] = angle_step * TAU / 24.0
+					var ends: PackedVector2Array = game.obstacle_endpoints(item)
+					valid = valid and game.arena_rect.has_point(ends[0]) and game.arena_rect.has_point(ends[1])
+			else:
+				var ends: PackedVector2Array = game.obstacle_endpoints(item)
+				if item["kind"] == Game.LineKind.HORIZONTAL:
+					valid = valid and ends[0].x >= game.arena_rect.position.x and ends[1].x <= game.arena_rect.end.x
+				else:
+					valid = valid and ends[0].y >= game.arena_rect.position.y and ends[1].y <= game.arena_rect.end.y
+		expect(valid and rotations > 0, "Long moving barriers fit and half-speed rotating barriers stay inside through all angles at %s" % size)
+	game.begin_run()
+	game._open_settings()
+	touch(game, 30, game._music_mode_button().get_center())
+	expect(game.music_mode and game.settings_open and game.phase == Game.Phase.PAUSED and game.elapsed == 0, "Mode switches inside settings, restarts and stays paused until closing")
+	touch(game, 31, game._settings_close_button().get_center())
+	expect(game.phase == Game.Phase.PLAYING and not game.settings_open, "Closing settings resumes the selected music mode")
+	game.spawn_wait = 999
+	game.pickup_wait = 999
+	game.music_clock.reset()
+	game.music_clock.update(game.music_clock.offset + 4 * game.music_clock.period)
+	game.obstacles.clear()
+	game.obstacles.append({"center": game.player + Vector2(200, 0), "angle": PI / 2, "length": 50.0, "velocity": Vector2.ZERO, "spin": 0.0, "age": 2.0, "warning": 0.8, "life": 20.0})
+	var start: Vector2 = game.player
+	touch(game, 32, game.touch_controls.fixed_center)
+	drag(game, 32, game.touch_controls.fixed_center + Vector2(50, 0))
+	touch(game, 33, game.touch_controls.dash_center)
+	expect(game.music_waves.size() == 1 and game.dash_remaining == 0 and not game._mobile_dash_ready() and game.touch_controls.move_touch == 32, "Two-finger on-beat wave grays the button and preserves movement ownership")
+	touch(game, 32, game.touch_controls.fixed_center, false)
+	game.advance_game(0.25, Vector2.ZERO)
+	expect(game.broken_obstacles == 1 and game.player == start, "Mobile wave reaches scaled range and shatters a phased barrier without dash displacement")
+	touch(game, 33, game.touch_controls.dash_center, false)
+	game.music_clock.update(game.music_clock.position + game.music_clock.period - 0.06)
+	touch(game, 34, game.touch_controls.dash_center)
+	expect(game.music_wave_buffered_beat == 5 and game.music_waves.size() == 1, "Gray touch button accepts the 80ms early buffer")
+	game._update_music_beat(0.07)
+	expect(game.music_waves.size() == 2 and not game._mobile_dash_ready(), "Buffered touch fires one on-beat wave and consumes that beat")
+	game._update_music_beat(game.music_clock.period)
+	expect(game._mobile_dash_ready() and game.music_waves.size() == 2, "Next beat restores button without automatically firing from a held touch")
+	for stage in range(1, 4):
+		game.lives = stage
+		expect(game._music_wave_radius() == Game.MUSIC_WAVE_RADII[stage - 1] * 3.0, "Stage %d music wave radius is three times base" % stage)
+	game._begin_super_dash()
+	game.obstacles.append({"center": game.player + Vector2(400, 0), "angle": 0.0, "length": 100.0, "velocity": Vector2.ZERO, "spin": 0.0, "age": 2.0, "warning": 0.8, "life": 20.0})
+	game._update_music_beat(game.music_clock.period)
+	expect(game.obstacles.is_empty() and game.super_dash_active, "Mobile super resonance automatically shatters phased obstacles on beat")
+	game._open_settings()
+	touch(game, 35, game._music_mode_button().get_center())
+	expect(not game.music_mode and game.settings_open and game.phase == Game.Phase.PAUSED, "Settings can switch back to ordinary mode without releasing a dash")
 	game.queue_free()
 	await process_frame
 	print("%s: %d mobile checks" % ["PASS" if failures.is_empty() else "FAIL", checks])

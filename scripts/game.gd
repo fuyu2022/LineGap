@@ -11,7 +11,9 @@ const SEPARATOR := Color("343a40")
 const RED := Color("ff758e")
 const GOLD := Color("ffd38a")
 const PLAYER_RADIUS := 7.0
-const MOBILE_WORLD_SCALE := 4.0
+const MOBILE_WORLD_SCALE := 3.0
+const MOBILE_MOVEMENT_SCALE := 1.5
+const MOBILE_SPIN_SCALE := 0.5
 const PLAYER_SPEED := 335.0
 const SAVE_PATH := "user://records.cfg"
 const LINE_SPEED := 90.0
@@ -52,7 +54,7 @@ const UI_TEXT := {
 		"stats": "存活 %.1f 秒   ·   收集 %d   ·   击碎 %d", "final_score": "得分  %05d",
 		"new_best": "新纪录", "switch_language": "English",
 		"music_on": "音乐：开", "music_off": "音乐：关",
-		"settings": "设置", "background_music": "背景音乐", "language": "语言",
+		"settings": "设置", "background_music": "背景音乐", "language": "语言", "game_mode": "游戏模式",
 		"settings_hint": "音乐开关不影响音效", "close_settings": "关闭 / ESC",
 		"joystick": "移动轮盘", "joystick_fixed": "固定轮盘", "joystick_follow": "跟随轮盘",
 		"mobile_start": "开始游戏", "mobile_restart": "重新开始", "mobile_resume": "继续游戏",
@@ -74,7 +76,7 @@ const UI_TEXT := {
 		"stats": "Survived %.1fs   ·   Orbs %d   ·   Broken %d", "final_score": "Score  %05d",
 		"new_best": "NEW BEST", "switch_language": "中文",
 		"music_on": "Music: On", "music_off": "Music: Off",
-		"settings": "Settings", "background_music": "Background music", "language": "Language",
+		"settings": "Settings", "background_music": "Background music", "language": "Language", "game_mode": "Game mode",
 		"settings_hint": "Sound effects remain enabled", "close_settings": "Close / Esc",
 		"joystick": "Joystick", "joystick_fixed": "Fixed", "joystick_follow": "Following",
 		"mobile_start": "Start game", "mobile_restart": "Play again", "mobile_resume": "Resume",
@@ -152,6 +154,8 @@ var music_feedback := ""
 var music_feedback_remaining := 0.0
 var music_output_latency := 0.0
 var music_wave_layer: Node2D
+var world_clip: Control
+var world_layer: Node2D
 var music_player: AudioStreamPlayer
 var web_audio
 var web_sound_names: Dictionary = {}
@@ -183,14 +187,27 @@ func _ready() -> void:
 	rng.randomize()
 	_build_grid()
 	background_layer = Node2D.new()
-	background_layer.z_index = -1
+	background_layer.z_index = -2 if mobile_ui else -1
 	background_layer.draw.connect(_draw_background)
 	add_child(background_layer)
+	if mobile_ui:
+		world_clip = Control.new()
+		world_clip.position = arena_rect.position
+		world_clip.size = arena_rect.size
+		world_clip.clip_contents = true
+		world_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		world_clip.z_index = -1
+		add_child(world_clip)
+		world_layer = Node2D.new()
+		world_layer.position = -world_clip.position
+		world_layer.draw.connect(_draw_mobile_world)
+		world_clip.add_child(world_layer)
 	ripple_clip = Control.new()
 	ripple_clip.position = arena_rect.position + Vector2(3, 3)
 	ripple_clip.size = arena_rect.size - Vector2(6, 6)
 	ripple_clip.clip_contents = true
 	ripple_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ripple_clip.z_index = -1 if mobile_ui else 0
 	add_child(ripple_clip)
 	dash_ripple.position = -ripple_clip.position
 	dash_ripple.visual_scale = _world_scale()
@@ -261,6 +278,8 @@ func _handle_ui_press(at: Vector2) -> bool:
 	if settings_open:
 		if _music_button().has_point(at):
 			set_music_enabled(not music_enabled)
+		elif mobile_ui and _music_mode_button().has_point(at):
+			set_music_mode(not music_mode)
 		elif _language_button().has_point(at):
 			_start_music_if_enabled()
 			set_language("en" if language == "zh" else "zh")
@@ -272,10 +291,10 @@ func _handle_ui_press(at: Vector2) -> bool:
 	if _settings_button().has_point(at):
 		_open_settings()
 		return true
-	if _music_mode_button().has_point(at):
+	if not mobile_ui and _music_mode_button().has_point(at):
 		set_music_mode(not music_mode)
 		return true
-	if music_mode and phase == Phase.PLAYING and Rect2(420, 654, 226, 45).has_point(at):
+	if not mobile_ui and music_mode and phase == Phase.PLAYING and Rect2(420, 654, 226, 45).has_point(at):
 		try_dash()
 		return true
 	if phase != Phase.PLAYING and _primary_button().has_point(at):
@@ -315,11 +334,21 @@ func _layout_mobile() -> void:
 		if safe_end.x > safe_start.x and safe_end.y > safe_start.y:
 			safe = view.intersection(Rect2(safe_start, safe_end - safe_start))
 	arena_rect = safe.grow(-16)
+	for item in obstacles:
+		_fit_mobile_obstacle(item)
 	touch_controls.configure(view, safe, arena_rect)
 	player = _clamp_player(player)
 	if ripple_clip != null:
 		ripple_clip.position = arena_rect.position
 		ripple_clip.size = arena_rect.size
+		dash_ripple.position = -ripple_clip.position
+		dash_ripple.visual_scale = _world_scale()
+		music_wave_layer.position = -ripple_clip.position
+	if world_clip != null:
+		world_clip.position = arena_rect.position
+		world_clip.size = arena_rect.size
+		world_layer.position = -world_clip.position
+		world_layer.queue_redraw()
 	if grid_dots != null:
 		_build_grid()
 	if background_layer != null:
@@ -340,8 +369,7 @@ func _mobile_header_inset() -> float:
 
 func _music_mode_button() -> Rect2:
 	if mobile_ui:
-		var settings := _settings_button()
-		return Rect2(settings.position + Vector2(-32, 86), Vector2(216, 64))
+		return _mobile_setting_button(1)
 	return MUSIC_MODE_BUTTON
 
 
@@ -361,6 +389,8 @@ func set_music_mode(enabled: bool) -> void:
 	if music_mode == enabled:
 		return
 	var restart := phase != Phase.READY
+	var keep_settings := mobile_ui and settings_open
+	var resume_after_switch := settings_resume_playing or phase == Phase.DEAD
 	music_mode = enabled
 	if not test_mode:
 		_save_mode_preference()
@@ -369,6 +399,11 @@ func set_music_mode(enabled: bool) -> void:
 		begin_run()
 	else:
 		_reset_music_run()
+	if keep_settings:
+		settings_open = true
+		settings_resume_playing = resume_after_switch
+		if restart:
+			phase = Phase.PAUSED
 	_sync_music_transport()
 	if background_layer != null:
 		background_layer.queue_redraw()
@@ -444,7 +479,7 @@ func _on_music_beat() -> void:
 
 
 func _music_wave_radius() -> float:
-	return MUSIC_WAVE_RADII[clampi(lives - 1, 0, 2)] * (1.5 if mobile_ui else 1.0)
+	return MUSIC_WAVE_RADII[clampi(lives - 1, 0, 2)] * _world_scale()
 
 
 func _try_music_wave() -> bool:
@@ -497,7 +532,7 @@ func _music_wave_impact(before: PackedVector2Array, after: PackedVector2Array) -
 			var b := before[1].lerp(after[1], fraction)
 			var closest := Geometry2D.get_closest_point_to_segment(center, a, b)
 			var farthest := maxf(center.distance_to(a), center.distance_to(b))
-			if center.distance_to(closest) <= float(wave["radius"]) + 3.0 and farthest >= float(wave["previous_radius"]) - 3.0:
+			if center.distance_to(closest) <= float(wave["radius"]) + 3.0 * _world_scale() and farthest >= float(wave["previous_radius"]) - 3.0 * _world_scale():
 				return closest
 	return Vector2.INF
 
@@ -515,33 +550,37 @@ func _best_record_font_size() -> int:
 
 func _music_button() -> Rect2:
 	if mobile_ui:
-		var panel := _mobile_settings_panel()
-		return Rect2(panel.end.x - 408, panel.position.y + 145, 360, 82)
+		return _mobile_setting_button(0)
 	return MUSIC_BUTTON
 
 
 func _language_button() -> Rect2:
 	if mobile_ui:
-		var panel := _mobile_settings_panel()
-		return Rect2(panel.end.x - 408, panel.position.y + 285, 360, 82)
+		return _mobile_setting_button(2)
 	return LANGUAGE_BUTTON
 
 
 func _settings_close_button() -> Rect2:
 	if mobile_ui:
 		var panel := _mobile_settings_panel()
-		return Rect2(panel.get_center().x - 220, panel.end.y - 108, 440, 84)
+		var factor := panel.size.y / 680.0
+		return Rect2(panel.get_center().x - 220, panel.end.y - 92 * factor, 440, 72 * factor)
 	return SETTINGS_CLOSE_BUTTON
 
 
 func _joystick_button() -> Rect2:
+	return _mobile_setting_button(3)
+
+
+func _mobile_setting_button(row: int) -> Rect2:
 	var panel := _mobile_settings_panel()
-	return Rect2(panel.end.x - 408, panel.position.y + 397, 360, 82)
+	var factor := panel.size.y / 680.0
+	return Rect2(panel.end.x - 408, panel.position.y + (128 + row * 96) * factor, 360, 76 * factor)
 
 
 func _mobile_settings_panel() -> Rect2:
 	var safe: Rect2 = touch_controls.safe_bounds
-	var size := Vector2(minf(1080, safe.size.x - 96), minf(620, safe.size.y - 160))
+	var size := Vector2(minf(1080, safe.size.x - 96), minf(680, safe.size.y - 96))
 	return Rect2(safe.get_center() - size * 0.5, size)
 
 
@@ -715,6 +754,8 @@ func _process(_delta: float) -> void:
 	_sync_music_transport()
 	dash_ripple.queue_redraw()
 	music_wave_layer.queue_redraw()
+	if world_layer != null:
+		world_layer.queue_redraw()
 
 
 func _update_score() -> void:
@@ -741,24 +782,24 @@ func advance_game(delta: float, direction: Vector2) -> void:
 	var normal_time := delta
 	var super_move_time := 0.0 if music_mode else minf(maxf(0.0, delta - dash_time), maxf(0.0, super_time - dash_time))
 	if dash_remaining > 0:
-		velocity = dash_direction * DASH_SPEED
+		velocity = dash_direction * _dash_speed()
 		player += velocity * dash_time
 		dash_end_player = _clamp_player(player)
 		dash_remaining = maxf(0, dash_remaining - dash_time)
 		normal_time -= dash_time
 		if dash_remaining == 0:
-			velocity = move_direction * PLAYER_SPEED * (SUPER_MOVE_MULTIPLIER if super_time > dash_time else 1.0)
+			velocity = move_direction * _player_speed() * (SUPER_MOVE_MULTIPLIER if super_time > dash_time else 1.0)
 	var super_walk_start := dash_end_player if dash_time > 0 else previous_player
 	var super_walk_end := super_walk_start
 	if super_move_time > 0:
-		velocity = velocity.move_toward(move_direction * PLAYER_SPEED * SUPER_MOVE_MULTIPLIER, 2400.0 * SUPER_MOVE_MULTIPLIER * super_move_time)
+		velocity = velocity.move_toward(move_direction * _player_speed() * SUPER_MOVE_MULTIPLIER, 2400.0 * _movement_scale() * SUPER_MOVE_MULTIPLIER * super_move_time)
 		player += velocity * super_move_time
 		super_walk_end = _clamp_player(player)
 	var ordinary_move_time := maxf(0.0, normal_time - super_move_time)
 	if ordinary_move_time > 0:
 		if super_move_time > 0:
 			velocity /= SUPER_MOVE_MULTIPLIER
-		velocity = velocity.move_toward(move_direction * PLAYER_SPEED, 2400.0 * ordinary_move_time)
+		velocity = velocity.move_toward(move_direction * _player_speed(), 2400.0 * _movement_scale() * ordinary_move_time)
 		player += velocity * ordinary_move_time
 	player = _clamp_player(player)
 	if super_dash_this_frame:
@@ -802,7 +843,7 @@ func advance_game(delta: float, direction: Vector2) -> void:
 			var super_dash_time := minf(dash_time, super_time)
 			var super_fraction := super_time / delta if delta > 0 else 0.0
 			var super_ends := PackedVector2Array([before[0].lerp(ends[0], super_fraction), before[1].lerp(ends[1], super_fraction)])
-			var super_dash_end := _clamp_player(previous_player + dash_direction * DASH_SPEED * super_dash_time)
+			var super_dash_end := _clamp_player(previous_player + dash_direction * _dash_speed() * super_dash_time)
 			var super_dash_fraction := super_dash_time / delta if delta > 0 else 0.0
 			var super_dash_ends := PackedVector2Array([before[0].lerp(ends[0], super_dash_fraction), before[1].lerp(ends[1], super_dash_fraction)])
 			var struck_during_super := super_dash_time > 0 and _path_hits_obstacle(previous_player, super_dash_end, before, super_dash_ends)
@@ -869,6 +910,18 @@ func _world_scale() -> float:
 	return MOBILE_WORLD_SCALE if mobile_ui else 1.0
 
 
+func _movement_scale() -> float:
+	return MOBILE_MOVEMENT_SCALE if mobile_ui else 1.0
+
+
+func _player_speed() -> float:
+	return PLAYER_SPEED * _movement_scale()
+
+
+func _dash_speed() -> float:
+	return DASH_SPEED * _movement_scale()
+
+
 func _path_hits_obstacle(start: Vector2, end: Vector2, before: PackedVector2Array, after: PackedVector2Array) -> bool:
 	for sample in range(3):
 		var fraction := float(sample) * 0.5
@@ -909,7 +962,7 @@ func _shatter_obstacle(index: int, ends: PackedVector2Array, impact: Vector2) ->
 		var side := -1.0 if piece % 2 == 0 else 1.0
 		fragments.append({"kind": "shard", "position": center, "angle": line.angle() + rng.randf_range(-1.15, 1.15),
 			"half_length": minf(line.length() * span * 0.3, rng.randf_range(3, 7)), "width": rng.randf_range(1.3, 2.1),
-			"velocity": away * lerpf(50, 110, proximity) + normal * side * rng.randf_range(140, 280) + dash_direction * rng.randf_range(35, 95),
+			"velocity": (away * lerpf(50, 110, proximity) + normal * side * rng.randf_range(140, 280) + dash_direction * rng.randf_range(35, 95)) * _world_scale(),
 			"drag": 3.2, "spin": rng.randf_range(-4.5, 4.5), "age": 0.0, "life": rng.randf_range(0.4, 0.7), "color": color})
 	# A concentrated white-hot spray marks the contact point; heavier shards carry the line away.
 	for spark in 18:
@@ -918,9 +971,9 @@ func _shatter_obstacle(index: int, ends: PackedVector2Array, impact: Vector2) ->
 		var direction_out := dash_direction.rotated(rng.randf_range(-1.15, 1.15))
 		if spark % 5 == 0:
 			direction_out = -direction_out
-		fragments.append({"kind": "spark", "position": impact + Vector2(rng.randf_range(-3, 3), rng.randf_range(-3, 3)),
+		fragments.append({"kind": "spark", "position": impact + Vector2(rng.randf_range(-3, 3), rng.randf_range(-3, 3)) * _world_scale(),
 			"angle": direction_out.angle(), "half_length": rng.randf_range(2, 5), "width": rng.randf_range(1.0, 1.6),
-			"velocity": direction_out * rng.randf_range(230, 560), "drag": 4.0, "spin": 0.0, "age": 0.0,
+			"velocity": direction_out * rng.randf_range(230, 560) * _world_scale(), "drag": 4.0, "spin": 0.0, "age": 0.0,
 			"life": rng.randf_range(0.18, 0.38), "color": color.lerp(WHITE, 0.6)})
 
 
@@ -938,16 +991,29 @@ func _spawn_obstacle() -> void:
 	if rotating:
 		# Announced rotating bars are placed well away from the player.
 		length = rng.randf_range(145, 225) * _world_scale()
+		if mobile_ui:
+			length = minf(length, minf(arena_rect.size.x, arena_rect.size.y) - 16.0 * _world_scale())
 		var clearance := maxf(200.0, length * 0.5 + PLAYER_RADIUS * _world_scale() + 60.0)
-		center = Vector2(rng.randf_range(arena_rect.position.x + 152, arena_rect.end.x - 152), rng.randf_range(arena_rect.position.y + 92, arena_rect.end.y - 92))
-		if center.distance_to(player) < clearance:
-			center = arena_rect.get_center() * 2.0 - player
-			center.x = clampf(center.x, arena_rect.position.x + 142, arena_rect.end.x - 142)
-			center.y = clampf(center.y, arena_rect.position.y + 102, arena_rect.end.y - 102)
-			if center.distance_to(player) < maxf(180.0, clearance - 20.0):
+		if mobile_ui:
+			var centers := arena_rect.grow(-length * 0.5 - 8.0 * _world_scale())
+			var found := false
+			for attempt in 20:
+				center = Vector2(rng.randf_range(centers.position.x, centers.end.x), rng.randf_range(centers.position.y, centers.end.y))
+				if center.distance_to(player) >= clearance:
+					found = true
+					break
+			if not found:
 				return
+		else:
+			center = Vector2(rng.randf_range(arena_rect.position.x + 152, arena_rect.end.x - 152), rng.randf_range(arena_rect.position.y + 92, arena_rect.end.y - 92))
+			if center.distance_to(player) < clearance:
+				center = arena_rect.get_center() * 2.0 - player
+				center.x = clampf(center.x, arena_rect.position.x + 142, arena_rect.end.x - 142)
+				center.y = clampf(center.y, arena_rect.position.y + 102, arena_rect.end.y - 102)
+				if center.distance_to(player) < maxf(180.0, clearance - 20.0):
+					return
 		angle = rng.randf_range(0, TAU)
-		spin = rng.randf_range(0.55, 1.1) * (-1.0 if rng.randf() < 0.5 else 1.0)
+		spin = rng.randf_range(0.55, 1.1) * (-1.0 if rng.randf() < 0.5 else 1.0) * (MOBILE_SPIN_SCALE if mobile_ui else 1.0)
 		warning = 1.15
 		life = 7.0
 	else:
@@ -968,11 +1034,39 @@ func _spawn_obstacle() -> void:
 				angle = PI / 2.0
 	var kind := LineKind.ROTATING if rotating else (LineKind.HORIZONTAL if side < 2 else LineKind.VERTICAL)
 	if mobile_ui and not rotating:
+		var padding := 8.0 * _world_scale()
+		var span := arena_rect.size.x if side < 2 else arena_rect.size.y
+		length = minf(length, span - padding * 2.0)
+		var margin := length * 0.5 + padding
+		if side < 2:
+			center.x = rng.randf_range(arena_rect.position.x + margin, arena_rect.end.x - margin)
+		else:
+			center.y = rng.randf_range(arena_rect.position.y + margin, arena_rect.end.y - margin)
 		life = maxf(life, (arena_rect.size.x if side >= 2 else arena_rect.size.y) / speed + 2.0)
 	var item := {"center": center, "velocity": travel, "angle": angle, "kind": kind,
 		"spin": spin, "length": length, "age": 0.0, "warning": warning, "life": life,
 		"ghost_remaining": music_ghost_remaining if music_mode else 0.0}
 	obstacles.append(item)
+
+
+func _fit_mobile_obstacle(item: Dictionary) -> void:
+	var padding := 8.0 * _world_scale()
+	var kind: int = item.get("kind", LineKind.ROTATING)
+	var at: Vector2 = item["center"]
+	if kind == LineKind.ROTATING:
+		item["length"] = minf(item["length"], minf(arena_rect.size.x, arena_rect.size.y) - padding * 2)
+		var margin := float(item["length"]) * 0.5 + padding
+		at.x = clampf(at.x, arena_rect.position.x + margin, arena_rect.end.x - margin)
+		at.y = clampf(at.y, arena_rect.position.y + margin, arena_rect.end.y - margin)
+	elif kind == LineKind.HORIZONTAL:
+		item["length"] = minf(item["length"], arena_rect.size.x - padding * 2)
+		var margin := float(item["length"]) * 0.5 + padding
+		at.x = clampf(at.x, arena_rect.position.x + margin, arena_rect.end.x - margin)
+	else:
+		item["length"] = minf(item["length"], arena_rect.size.y - padding * 2)
+		var margin := float(item["length"]) * 0.5 + padding
+		at.y = clampf(at.y, arena_rect.position.y + margin, arena_rect.end.y - margin)
+	item["center"] = at
 
 
 func obstacle_endpoints(item: Dictionary) -> PackedVector2Array:
@@ -1221,7 +1315,7 @@ func _emit_ring(at: Vector2, color: Color, radius: float) -> void:
 func _emit_sparks(at: Vector2, color: Color, count: int) -> void:
 	for index in count:
 		var direction := Vector2.from_angle(rng.randf_range(0, TAU))
-		sparks.append({"position": at, "velocity": direction * rng.randf_range(45, 230),
+		sparks.append({"position": at, "velocity": direction * rng.randf_range(45, 230) * _world_scale(),
 			"age": 0.0, "life": rng.randf_range(0.3, 0.9), "color": color})
 
 
@@ -1371,7 +1465,7 @@ func _draw() -> void:
 	draw_set_transform(offset)
 	if phase == Phase.READY:
 		_draw_demo()
-	else:
+	elif not mobile_ui:
 		_draw_world()
 	draw_set_transform(Vector2.ZERO)
 	_draw_footer()
@@ -1383,6 +1477,14 @@ func _draw() -> void:
 		_draw_overlay()
 	for index in range(mobile_text_cursor, mobile_text_labels.size()):
 		mobile_text_labels[index].hide()
+
+
+func _draw_mobile_world() -> void:
+	if phase == Phase.READY:
+		return
+	var offset := Vector2(sin(visual_time * 71.0), cos(visual_time * 59.0)) * shake
+	world_layer.draw_set_transform(offset)
+	_draw_world(world_layer)
 
 
 func _build_grid() -> void:
@@ -1479,24 +1581,28 @@ func _draw_mobile_header() -> void:
 	_text("%.1f" % elapsed, time_at + Vector2(0, 42), 40, WHITE)
 	var best_at := at + Vector2(width * 0.61, 0)
 	_text(ui_text("best"), best_at, 16, MUTED)
-	_text(_best_record_label(), best_at + Vector2(0, 42), 32, GOLD)
+	var record_width := _settings_button().position.x - 20 - best_at.x
+	_text(_best_record_label(), best_at + Vector2(0, 42), _fit_text_size(_best_record_label(), record_width, 32), GOLD)
 
 
 func _draw_demo() -> void:
 	var t := visual_time
+	var world_scale := _world_scale()
 	for index in range(4):
 		var center := Vector2(200 if index % 2 == 0 else 880, 242 + index * 69)
 		var direction := Vector2.from_angle(t * 0.2 + index * 1.1)
-		var a := center - direction * 62.0
-		var b := center + direction * 62.0
-		draw_line(a, b, WHITE * Color(1, 1, 1, 0.38), 2.0, true)
-		draw_circle(a, 2.5, WHITE * Color(1, 1, 1, 0.5))
-		draw_circle(b, 2.5, WHITE * Color(1, 1, 1, 0.5))
-	draw_arc(Vector2(540, 229), 24 + sin(t * 2) * 2, 0, TAU, 64, Color(0.4, 0.97, 0.86, 0.35), 1.0, true)
-	draw_circle(Vector2(540, 229), 7, CYAN, true, -1, true)
+		var a := center - direction * 62.0 * world_scale
+		var b := center + direction * 62.0 * world_scale
+		draw_line(a, b, WHITE * Color(1, 1, 1, 0.38), 2.0 * world_scale, true)
+		draw_circle(a, 2.5 * world_scale, WHITE * Color(1, 1, 1, 0.5))
+		draw_circle(b, 2.5 * world_scale, WHITE * Color(1, 1, 1, 0.5))
+	draw_arc(Vector2(540, 229), (24 + sin(t * 2) * 2) * world_scale, 0, TAU, 64, Color(0.4, 0.97, 0.86, 0.35), world_scale, true)
+	draw_circle(Vector2(540, 229), 7 * world_scale, CYAN, true, -1, true)
 
 
-func _draw_world() -> void:
+func _draw_world(canvas: Node2D = null) -> void:
+	if canvas == null:
+		canvas = self
 	var world_scale := _world_scale()
 	# Clip moving barriers to the arena so they never cross the HUD.
 	for item in obstacles:
@@ -1510,40 +1616,40 @@ func _draw_world() -> void:
 		if music_mode and ghost:
 			color = (GOLD if super_dash_active else CYAN) * Color(1, 1, 1, 0.48 + music_clock.pulse * 0.3)
 		if active:
-			draw_line(clipped[0], clipped[1], WHITE * Color(1, 1, 1, 0.065), 8.0 * world_scale, true)
-			draw_line(clipped[0], clipped[1], color, 2.5 * world_scale, true)
+			canvas.draw_line(clipped[0], clipped[1], WHITE * Color(1, 1, 1, 0.065), 8.0 * world_scale, true)
+			canvas.draw_line(clipped[0], clipped[1], color, 2.5 * world_scale, true)
 		else:
-			draw_dashed_line(clipped[0], clipped[1], color, 1.5 * world_scale, 7 * world_scale, true, true)
+			canvas.draw_dashed_line(clipped[0], clipped[1], color, 1.5 * world_scale, 7 * world_scale, true, true)
 		for endpoint in ends:
 			if arena_rect.has_point(endpoint):
-				draw_circle(endpoint, (3.0 if active else 2.0) * world_scale, color)
+				canvas.draw_circle(endpoint, (3.0 if active else 2.0) * world_scale, color)
 		if absf(item["spin"]) > 0.01 and arena_rect.has_point(item["center"]):
-			draw_circle(item["center"], 3.0 * world_scale, color)
+			canvas.draw_circle(item["center"], 3.0 * world_scale, color)
 	if pickup_active:
 		var alpha := 1.0 if pickup_age < 7.0 else 0.5 + 0.5 * sin(visual_time * 15)
 		var tint := GOLD * Color(1, 1, 1, alpha)
 		var breath: float = music_clock.pulse * 4.0 if music_mode else sin(visual_time * 4) * 2
-		draw_arc(pickup, (12 + breath) * world_scale, 0, TAU, 40, tint * Color(1, 1, 1, 0.4), world_scale, true)
-		draw_circle(pickup, 4.0 * world_scale, tint, true, -1, true)
-		draw_line(pickup + Vector2(-19, 0) * world_scale, pickup + Vector2(-15, 0) * world_scale, tint, world_scale, true)
-		draw_line(pickup + Vector2(15, 0) * world_scale, pickup + Vector2(19, 0) * world_scale, tint, world_scale, true)
+		canvas.draw_arc(pickup, (12 + breath) * world_scale, 0, TAU, 40, tint * Color(1, 1, 1, 0.4), world_scale, true)
+		canvas.draw_circle(pickup, 4.0 * world_scale, tint, true, -1, true)
+		canvas.draw_line(pickup + Vector2(-19, 0) * world_scale, pickup + Vector2(-15, 0) * world_scale, tint, world_scale, true)
+		canvas.draw_line(pickup + Vector2(15, 0) * world_scale, pickup + Vector2(19, 0) * world_scale, tint, world_scale, true)
 	if phase != Phase.DEAD:
 		var trail_color := GOLD if super_dash_active else CYAN
 		for index in range(1, trail.size()):
 			var alpha := (1.0 - float(index) / trail.size()) * 0.32
-			draw_line(trail[index - 1], trail[index], trail_color * Color(1, 1, 1, alpha), (3 if dash_remaining > 0 else 2) * world_scale, true)
+			canvas.draw_line(trail[index - 1], trail[index], trail_color * Color(1, 1, 1, alpha), (3 if dash_remaining > 0 else 2) * world_scale, true)
 		if lives >= 2:
-			_draw_gold_ring(player, 17 * world_scale)
+			_draw_gold_ring(player, 17 * world_scale, canvas)
 		if hit_grace > 0 or super_dash_active:
-			draw_arc(player, (18 + _ring_layers() * 6) * world_scale, visual_time * 3, visual_time * 3 + TAU * 0.8, 48,
+			canvas.draw_arc(player, (18 + _ring_layers() * 6) * world_scale, visual_time * 3, visual_time * 3 + TAU * 0.8, 48,
 				(GOLD if super_dash_active else CYAN) * Color(1, 1, 1, 0.8 if super_dash_active else 0.35 + hit_grace / HIT_GRACE * 0.45), 1.5 * world_scale, true)
 		var breath: float = music_clock.pulse if music_mode else 0.0
-		draw_circle(player, (13 + breath * 5) * world_scale, CYAN * Color(1, 1, 1, 0.07 + breath * 0.08))
-		draw_arc(player, (11 + breath * 4) * world_scale, 0, TAU, 40, CYAN * Color(1, 1, 1, 0.35 + breath * 0.35), world_scale, true)
-		draw_circle(player, PLAYER_RADIUS * world_scale, WHITE if dash_remaining > 0 else CYAN, true, -1, true)
+		canvas.draw_circle(player, (13 + breath * 5) * world_scale, CYAN * Color(1, 1, 1, 0.07 + breath * 0.08))
+		canvas.draw_arc(player, (11 + breath * 4) * world_scale, 0, TAU, 40, CYAN * Color(1, 1, 1, 0.35 + breath * 0.35), world_scale, true)
+		canvas.draw_circle(player, PLAYER_RADIUS * world_scale, WHITE if dash_remaining > 0 else CYAN, true, -1, true)
 	for ring in rings:
 		var progress: float = ring["age"] / 0.6
-		draw_arc(ring["position"], lerpf(8, ring["radius"], 1.0 - pow(1.0 - progress, 3)) * world_scale, 0, TAU, 64,
+		canvas.draw_arc(ring["position"], lerpf(8, ring["radius"], 1.0 - pow(1.0 - progress, 3)) * world_scale, 0, TAU, 64,
 			ring["color"] * Color(1, 1, 1, (1.0 - progress) * 0.65), 1.4 * world_scale, true)
 	var spark_points := PackedVector2Array()
 	var spark_colors := PackedColorArray()
@@ -1554,13 +1660,15 @@ func _draw_world() -> void:
 		spark_points.append(at - spark["velocity"] * 0.025)
 		spark_colors.append(spark["color"] * Color(1, 1, 1, alpha))
 	if not spark_points.is_empty():
-		draw_multiline_colors(spark_points, spark_colors, 1.5 * world_scale, true)
-	_draw_fragments()
+		canvas.draw_multiline_colors(spark_points, spark_colors, 1.5 * world_scale, true)
+	_draw_fragments(canvas)
 	if flash > 0.0:
-		draw_rect(arena_rect, RED * Color(1, 1, 1, flash * 0.08))
+		canvas.draw_rect(arena_rect, RED * Color(1, 1, 1, flash * 0.08))
 
 
-func _draw_fragments() -> void:
+func _draw_fragments(canvas: Node2D = null) -> void:
+	if canvas == null:
+		canvas = self
 	# Group nearby widths to preserve shards and glow with a handful of draw commands.
 	var points: Array[PackedVector2Array] = []
 	var colors: Array[PackedColorArray] = []
@@ -1590,20 +1698,22 @@ func _draw_fragments() -> void:
 			glows[bucket].append(tint * Color(1, 1, 1, alpha * 0.12))
 	for bucket in 6:
 		if not points[bucket].is_empty():
-			draw_multiline_colors(points[bucket], glows[bucket], (4.0 + bucket * 0.25) * _world_scale(), true)
+			canvas.draw_multiline_colors(points[bucket], glows[bucket], (4.0 + bucket * 0.25) * _world_scale(), true)
 	for bucket in 6:
 		if not points[bucket].is_empty():
-			draw_multiline_colors(points[bucket], colors[bucket], (1.0 + bucket * 0.25) * _world_scale(), true)
+			canvas.draw_multiline_colors(points[bucket], colors[bucket], (1.0 + bucket * 0.25) * _world_scale(), true)
 
 
-func _draw_gold_ring(at: Vector2, radius: float) -> void:
+func _draw_gold_ring(at: Vector2, radius: float, canvas: Node2D = null) -> void:
+	if canvas == null:
+		canvas = self
 	if lives == 2:
 		for segment in 12:
 			var start := TAU * segment / 12.0
-			draw_arc(at, radius, start, start + TAU / 12.0 * 0.55, 8,
+			canvas.draw_arc(at, radius, start, start + TAU / 12.0 * 0.55, 8,
 				GOLD * Color(1, 1, 1, 0.35), _world_scale(), true)
 	else:
-		draw_arc(at, radius, 0, TAU, 64, GOLD * Color(1, 1, 1, 0.95), 1.5 * _world_scale(), true)
+		canvas.draw_arc(at, radius, 0, TAU, 64, GOLD * Color(1, 1, 1, 0.95), 1.5 * _world_scale(), true)
 
 
 func _clip_to_arena(a: Vector2, b: Vector2) -> PackedVector2Array:
@@ -1689,15 +1799,15 @@ func _draw_music_waves() -> void:
 			tint = GOLD
 		var at: Vector2 = wave["position"]
 		var radius: float = maxf(1.0, wave["radius"])
-		music_wave_layer.draw_arc(at, radius, 0, TAU, 128, tint * Color(1, 1, 1, alpha * 0.1), 9.0, true)
-		music_wave_layer.draw_arc(at, radius, 0, TAU, 128, tint * Color(1, 1, 1, alpha * 0.85), 2.0, true)
+		music_wave_layer.draw_arc(at, radius, 0, TAU, 128, tint * Color(1, 1, 1, alpha * 0.1), 9.0 * _world_scale(), true)
+		music_wave_layer.draw_arc(at, radius, 0, TAU, 128, tint * Color(1, 1, 1, alpha * 0.85), 2.0 * _world_scale(), true)
 
 
 func _draw_settings_button(rect: Rect2, label: String, color: Color) -> void:
 	var hover := rect.has_point(get_global_mouse_position())
 	draw_rect(rect, color * Color(1, 1, 1, 0.07 if hover else 0.025))
 	draw_rect(rect, color * Color(1, 1, 1, 0.7 if hover else 0.3), false, 1.0)
-	var text_size := 40 if mobile_ui else 13
+	var text_size := _fit_text_size(label, rect.size.x - 24, mini(40, int(rect.size.y * 0.55))) if mobile_ui else 13
 	var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, text_size).x
 	_text(label, rect.get_center() + Vector2(-width * 0.5, text_size * 0.35), text_size, color)
 
@@ -1721,23 +1831,29 @@ func _draw_settings() -> void:
 
 
 func _mobile_dash_ready() -> bool:
+	if music_mode:
+		return phase == Phase.PLAYING and not settings_open and music_wave_ready
 	return phase == Phase.PLAYING and not settings_open and (super_dash_active or (dash_remaining <= 0 and dash_cooldown_remaining <= 0))
 
 
 func _draw_mobile_settings() -> void:
 	mobile_overlay_text = true
 	var panel := _mobile_settings_panel()
+	var factor := panel.size.y / 680.0
 	draw_rect(panel, BACKGROUND)
 	draw_rect(panel, CYAN * Color(1, 1, 1, 0.25), false, 2.0)
-	_text_at_center(ui_text("settings"), Vector2(panel.get_center().x, panel.position.y + 80), 64, WHITE)
-	draw_line(panel.position + Vector2(48, 108), Vector2(panel.end.x - 48, panel.position.y + 108), SEPARATOR, 2.0)
-	_text(ui_text("background_music"), panel.position + Vector2(48, 195), 36, WHITE)
-	_text(ui_text("settings_hint"), panel.position + Vector2(48, 250), 28, MUTED)
+	_text_at_center(ui_text("settings"), Vector2(panel.get_center().x, panel.position.y + 76 * factor), int(60 * factor), WHITE)
+	draw_line(panel.position + Vector2(48, 102 * factor), Vector2(panel.end.x - 48, panel.position.y + 102 * factor), SEPARATOR, 2.0)
+	_text(ui_text("background_music"), Vector2(panel.position.x + 48, _music_button().get_center().y + 12 * factor), int(36 * factor), WHITE)
 	_draw_settings_button(_music_button(), ui_text("music_on" if music_enabled else "music_off"), CYAN if music_enabled else MUTED)
-	_text(ui_text("language"), panel.position + Vector2(48, 335), 36, WHITE)
+	_text(ui_text("game_mode"), Vector2(panel.position.x + 48, _music_mode_button().get_center().y + 12 * factor), int(36 * factor), WHITE)
+	_draw_settings_button(_music_mode_button(), ui_text("music_mode" if music_mode else "normal_mode"), GOLD if music_mode else CYAN)
+	_text(ui_text("language"), Vector2(panel.position.x + 48, _language_button().get_center().y + 12 * factor), int(36 * factor), WHITE)
 	_draw_settings_button(_language_button(), ui_text("switch_language"), CYAN)
-	_text(ui_text("joystick"), panel.position + Vector2(48, 447), 36, WHITE)
+	_text(ui_text("joystick"), Vector2(panel.position.x + 48, _joystick_button().get_center().y + 12 * factor), int(36 * factor), WHITE)
 	_draw_settings_button(_joystick_button(), ui_text("joystick_follow" if touch_controls.following else "joystick_fixed"), CYAN)
+	_text(ui_text("mode_hint"), panel.position + Vector2(48, 538 * factor), int(26 * factor), MUTED)
+	_text(ui_text("settings_hint"), panel.position + Vector2(48, 571 * factor), int(24 * factor), MUTED)
 	_draw_settings_button(_settings_close_button(), ui_text("mobile_close"), CYAN)
 	_draw_settings_button(_settings_button(), ui_text("settings"), CYAN)
 	mobile_overlay_text = false
@@ -1747,25 +1863,41 @@ func _draw_mobile_controls() -> void:
 	_draw_settings_button(_settings_button(), ui_text("settings"), CYAN)
 	if phase != Phase.PLAYING or settings_open:
 		return
+	_draw_mobile_joystick()
+	_draw_mobile_dash_button()
+
+
+func _draw_mobile_joystick() -> void:
 	var center: Vector2 = touch_controls.center
 	var active: bool = touch_controls.move_touch != -1
+	if touch_controls.following and not active:
+		return
 	var color := CYAN if active else MUTED
 	draw_circle(center, MobileControls.RADIUS, Color(0.02, 0.05, 0.05, 0.2))
 	draw_arc(center, MobileControls.RADIUS, 0, TAU, 80, color * Color(1, 1, 1, 0.65), 2.0 * MobileControls.CONTROL_SCALE, true)
 	draw_arc(center, MobileControls.RADIUS * MobileControls.DEAD_ZONE, 0, TAU, 32, color * Color(1, 1, 1, 0.2), MobileControls.CONTROL_SCALE, true)
 	draw_circle(center + touch_controls.knob, 24 * MobileControls.CONTROL_SCALE, color * Color(1, 1, 1, 0.18))
 	draw_arc(center + touch_controls.knob, 24 * MobileControls.CONTROL_SCALE, 0, TAU, 40, color, 2.0 * MobileControls.CONTROL_SCALE, true)
+
+
+func _draw_mobile_dash_button() -> void:
 	var dash_at: Vector2 = touch_controls.dash_center
 	var ready := _mobile_dash_ready()
 	var dash_color := (GOLD if super_dash_active else CYAN) if ready else MUTED
 	draw_circle(dash_at, MobileControls.DASH_RADIUS, Color(0.02, 0.05, 0.05, 0.25))
 	draw_arc(dash_at, MobileControls.DASH_RADIUS, 0, TAU, 80, dash_color, 2.5 * MobileControls.CONTROL_SCALE, true)
 	var label := ui_text("mobile_dash") if ready else ("%.1f" % maxf(0.1, dash_cooldown_remaining) if dash_cooldown_remaining > 0 else ui_text("dashing"))
-	_text_at_center(label, dash_at + Vector2(0, 22), 60, dash_color)
+	if music_mode:
+		label = ui_text("wave" if ready else "beat_wait")
+		var progress: float = music_clock.progress()
+		draw_arc(dash_at, MobileControls.DASH_RADIUS + 12, -PI * 0.5, -PI * 0.5 + TAU * progress, 80, dash_color * Color(1, 1, 1, 0.75), 4.0, true)
+		if music_feedback_remaining > 0:
+			_text_at_center(ui_text(music_feedback), dash_at - Vector2(0, MobileControls.DASH_RADIUS + 24), 26, CYAN if music_feedback == "beat_hit" else MUTED)
+	_text_at_center(label, dash_at + Vector2(0, 20), _fit_text_size(label, MobileControls.DASH_RADIUS * 2 - 36, 60), dash_color)
 	if super_dash_active:
-		_center_text(ui_text("super_dash") % super_dash_remaining, touch_controls.safe_bounds.end.y - 18, 28, GOLD)
+		_center_text(ui_text("super_music" if music_mode else "super_dash") % super_dash_remaining, touch_controls.safe_bounds.end.y - 18, 28, GOLD)
 	else:
-		_center_text(ui_text("super_progress") % [collected % SUPER_DASH_ORBS, SUPER_DASH_ORBS], touch_controls.safe_bounds.end.y - 18, 26, MUTED)
+		_center_text(ui_text("music_progress" if music_mode else "super_progress") % [collected % SUPER_DASH_ORBS, SUPER_DASH_ORBS], touch_controls.safe_bounds.end.y - 18, 26, MUTED)
 	if hit_grace > 0:
 		_text(ui_text("protection") % hit_grace, Vector2(touch_controls.safe_bounds.end.x - 280, touch_controls.safe_bounds.end.y - 18), 26, CYAN)
 
@@ -1831,6 +1963,13 @@ func _text(value: String, at: Vector2, size: int, color: Color) -> void:
 func _text_at_center(value: String, at: Vector2, size: int, color: Color) -> void:
 	var width := font.get_string_size(value, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
 	_text(value, at - Vector2(width * 0.5, 0), size, color)
+
+
+func _fit_text_size(value: String, max_width: float, preferred: int) -> int:
+	var size := preferred
+	while size > 11 and font.get_string_size(value, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_width:
+		size -= 1
+	return size
 
 
 func _draw_mobile_overlay() -> void:

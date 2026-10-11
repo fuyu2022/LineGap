@@ -15,7 +15,6 @@ var dash_center := Vector2.ZERO
 var view_bounds := Rect2()
 var safe_bounds := Rect2()
 var move_region := Rect2()
-var center_bounds := Rect2()
 
 func configure(view: Rect2, safe: Rect2, arena: Rect2) -> void:
 	reset()
@@ -23,7 +22,6 @@ func configure(view: Rect2, safe: Rect2, arena: Rect2) -> void:
 	safe_bounds = safe
 	var top := maxf(arena.position.y, safe.position.y + 112)
 	move_region = Rect2(Vector2(safe.position.x + 20, top), Vector2(view.get_center().x - 40 - safe.position.x - 20, safe.end.y - 20 - top))
-	center_bounds = move_region
 	fixed_center = Vector2(safe.position.x + RADIUS + 32, safe.end.y - RADIUS - 48)
 	dash_center = Vector2(safe.end.x - DASH_RADIUS - 32, fixed_center.y)
 	center = fixed_center
@@ -64,12 +62,7 @@ func drag(index: int, at: Vector2) -> void:
 	if index != move_touch:
 		return
 	var offset := at - center
-	if following and offset.length() > RADIUS:
-		# Follow only after reaching the rim. Preserve a full-radius directional
-		# offset, so long drags keep full speed rather than recentering to zero.
-		var candidate := at - offset.normalized() * RADIUS
-		center = Vector2(clampf(candidate.x, center_bounds.position.x, center_bounds.end.x), clampf(candidate.y, center_bounds.position.y, center_bounds.end.y))
-		offset = at - center
+	# The touchdown point stays anchored for this gesture; only the knob moves.
 	knob = offset.limit_length(RADIUS)
 	var strength := clampf((offset.length() / RADIUS - DEAD_ZONE) / (1.0 - DEAD_ZONE), 0.0, 1.0)
 	direction = offset.normalized() * strength if strength > 0 else Vector2.ZERO
@@ -79,6 +72,7 @@ func release(index: int) -> void:
 		move_touch = -1
 		direction = Vector2.ZERO
 		knob = Vector2.ZERO
-		center = fixed_center
+		if not following:
+			center = fixed_center
 	if index == dash_touch:
 		dash_touch = -1

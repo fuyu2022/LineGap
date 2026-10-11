@@ -47,6 +47,7 @@ func run() -> void:
 	game.broken_obstacles = 22
 	game.best = 12345
 	game.best_broken = 111
+	game.best_time = 123.4
 	game.lives = 3
 	game.elapsed = 18.5
 	game.spawn_wait = 999
@@ -66,6 +67,7 @@ func run() -> void:
 			var item: Dictionary = game.obstacles[index]
 			item["age"] = 2.0
 			item["center"] = game.arena_rect.position + game.arena_rect.size * Vector2(0.15 + index * 0.2, 0.35)
+			game._fit_mobile_obstacle(item)
 		await capture("%dx%d" % [size.x, size.y])
 	root.size = Vector2i(1440, 810)
 	preview.size = Vector2i(1440, 810)
@@ -79,13 +81,48 @@ func run() -> void:
 	game.super_dash_remaining = 5.6
 	game.set_joystick_following(true)
 	game.touch_controls.press(1, Vector2(120, 450))
-	game.touch_controls.drag(1, Vector2(240, 410))
+	game.touch_controls.drag(1, Vector2(480, 410))
 	await capture("following-super")
+	game.touch_controls.release(1)
+	await capture("following-released")
+	game.touch_controls.press(2, Vector2(260, 450))
+	await capture("following-next-touch")
+	game.touch_controls.release(2)
 	game._open_settings()
 	for selected in ["zh", "en"]:
 		game.set_language(selected)
 		await capture("settings-" + selected)
+	game.set_language("zh")
+	game._handle_ui_press(game._music_mode_button().get_center())
+	await capture("settings-music")
 	game._close_settings()
+	game.music_clock.reset()
+	game.music_clock.update(game.music_clock.offset + game.music_clock.period * 4)
+	game.lives = 3
+	game.try_dash()
+	game.advance_game(0.12, Vector2.ZERO)
+	await capture("music-wave")
+	game._update_music_beat(game.music_clock.period)
+	await capture("music-ready")
+	game._begin_super_dash()
+	await capture("music-super")
+	game.player = game._clamp_player(Vector2(game.arena_rect.position.x, game.arena_rect.get_center().y))
+	game.music_wave_ready = true
+	game.try_dash()
+	game._emit_ring(game.player, Game.GOLD, 95)
+	game.advance_game(0.2, Vector2.ZERO)
+	await capture("edge-effects")
+	var edge_image := preview.get_texture().get_image()
+	var leaking := 0
+	for x in range(0, 15):
+		for y in range(240, 480):
+			var pixel := edge_image.get_pixel(x, y)
+			if maxf(pixel.r, maxf(pixel.g, pixel.b)) > 0.02:
+				leaking += 1
+	if leaking > 0:
+		printerr("FAIL: effects painted outside mobile arena: ", leaking)
+		quit(1)
+		return
 	game.set_language("zh")
 	game.phase = Game.Phase.PAUSED
 	await capture("paused")
@@ -94,7 +131,7 @@ func run() -> void:
 	await capture("dead")
 	game.phase = Game.Phase.READY
 	await capture("title")
-	print("PASS: ten mobile screenshots saved")
+	print("PASS: mobile normal/music/settings screenshots and edge-effect clipping verified")
 	game.queue_free()
 	await process_frame
 	quit()
