@@ -45,6 +45,10 @@ func run() -> void:
 		expect(game.font.get_string_size(game.ui_text("dash_controls"), HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x < 132, "Dash hint fits " + selected)
 		expect(game.font.get_string_size(game.ui_text("cooldown") % 1.5, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x < 100, "Cooldown fits " + selected)
 		expect(game.font.get_string_size(game.ui_text("stats") % [999.9, 999, 999], HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x < Game.ARENA.size.x, "Death statistics fit " + selected)
+		for key in ["score", "broken"]:
+			expect(game.font.get_string_size(game.ui_text(key), HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x < 56, "Record row label fits " + selected + ":" + key)
+		expect(game.font.get_string_size("999999", HORIZONTAL_ALIGNMENT_LEFT, -1, 23).x < 134, "Record score fits " + selected)
+		expect(game.font.get_string_size(game.ui_text("best"), HORIZONTAL_ALIGNMENT_LEFT, -1, 12).x < 190, "Record heading fits " + selected)
 		for key in ["start", "resume", "restart"]:
 			expect(game.font.get_string_size(game.ui_text(key), HORIZONTAL_ALIGNMENT_LEFT, -1, 18).x < 260, "Button fits " + selected + ":" + key)
 		if visual:
@@ -54,6 +58,7 @@ func run() -> void:
 			game.elapsed = 24.6
 			game.score = 396
 			game.best = 820
+			game.best_broken = 25
 			game.broken_obstacles = 12
 			game.collected = 3
 			game.lives = 3
@@ -66,6 +71,9 @@ func run() -> void:
 			game.score = 1234
 			game.old_best = 820
 			await capture(game, "locale-" + selected + "-dead")
+			game._open_settings()
+			await capture(game, "locale-" + selected + "-settings")
+			game._close_settings()
 	game.set_language("en")
 	game.set_language("invalid")
 	expect(game.language == "en", "Invalid language cannot break UI")
@@ -81,11 +89,15 @@ func run() -> void:
 		game.lives = 2
 		game.dash_remaining = 0
 		game.dash_cooldown_remaining = 0.75
+		game._open_settings()
+		var settings_phase: int = game.phase
 		var previous: String = game.language
 		game._unhandled_input(click)
 		expect(game.language != previous, "Transformed language button works in phase %d" % state)
-		expect(game.phase == state and game.score == 396 and game.lives == 2, "Switch preserves run in phase %d" % state)
+		expect(game.phase == settings_phase and game.score == 396 and game.lives == 2, "Switch preserves paused settings state in phase %d" % state)
 		expect(game.dash_remaining == 0 and game.dash_cooldown_remaining == 0.75, "Language button neither dashes nor refills in phase %d" % state)
+		game._close_settings()
+		expect(game.phase == state, "Closing settings returns to the original phase %d" % state)
 	game.queue_free()
 	await process_frame
 	print("%s: %d localization checks" % ["PASS" if failures.is_empty() else "FAIL", checks])

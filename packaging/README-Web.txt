@@ -7,7 +7,7 @@ Windows local preview (Python required): double-click preview.cmd and open
 http://127.0.0.1:4265 in a current Chrome, Edge or Firefox browser.
 
 WASD / Arrows: move. Left mouse / Space: dash. Space: start/restart/resume.
-Esc: pause/resume. R: restart. Click English / 中文 to switch language.
+Esc: pause/resume. R: restart. Open Settings to switch language or music. Settings pauses gameplay until closed.
 
 Every seven orbs open a seven-second super-dash window: no dash cooldown and
 full invulnerability, including when not dashing. Press Space or left-click
@@ -16,7 +16,7 @@ Normal movement speed returns when the window ends. The dash bar and
 trail turn gold. Contacting any barrier shatters it throughout the window,
 including while walking or standing still. Manual bursts can turn.
 Finishing grants the existing two-second collision protection.
-Each shattered barrier awards 15 points. Pause freezes all timers; restarting clears progress. Normal cooldown returns
+Best score and most barriers shattered in one run are saved separately and shown at the top right. Each shattered barrier awards 15 points. Pause freezes all timers; restarting clears progress. Normal cooldown returns
 after the window ends.
 
 Click the game or press Space to enable audio. Background music loops

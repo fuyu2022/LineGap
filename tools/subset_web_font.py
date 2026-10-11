@@ -14,7 +14,8 @@ if not source.exists():
     urlretrieve(base + "NotoSansSC%5Bwght%5D.ttf", source)
 destination = root / "assets" / "fonts"
 destination.mkdir(parents=True, exist_ok=True)
-urlretrieve(base + "OFL.txt", destination / "OFL.txt")
+if not (destination / "OFL.txt").exists():
+    urlretrieve(base + "OFL.txt", destination / "OFL.txt")
 font = instantiateVariableFont(TTFont(source), {"wght": 400}, inplace=True)
 characters = set((root / "scripts" / "game.gd").read_text(encoding="utf-8"))
 characters.update(chr(n) for n in range(32, 127))

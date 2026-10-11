@@ -101,10 +101,14 @@ func run() -> void:
 		game.phase = state
 		game.dash_remaining = 0
 		game.dash_cooldown_remaining = 0.75
+		game._open_settings()
+		var settings_phase: int = game.phase
 		var previous: bool = game.music_enabled
 		game._unhandled_input(click)
 		expect(game.music_enabled != previous, "Music button works in phase %d after scaling" % state)
-		expect(game.phase == state and game.dash_remaining == 0 and game.dash_cooldown_remaining == 0.75, "Music button preserves the run and cannot trigger a dash in phase %d" % state)
+		expect(game.phase == settings_phase and game.dash_remaining == 0 and game.dash_cooldown_remaining == 0.75, "Music button preserves settings state and cannot trigger a dash in phase %d" % state)
+		game._close_settings()
+		expect(game.phase == state, "Closing music settings restores phase %d" % state)
 	for selected in ["zh", "en"]:
 		game.set_language(selected)
 		for key in ["music_on", "music_off"]:

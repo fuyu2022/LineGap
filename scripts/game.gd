@@ -26,8 +26,10 @@ const SUPER_DASH_DURATION := 7.0
 const SUPER_MOVE_MULTIPLIER := 2.0
 const SHATTER_SCORE := 15
 const MOVE_KEYS := [KEY_A, KEY_D, KEY_W, KEY_S, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN]
-const LANGUAGE_BUTTON := Rect2(916, 662, 116, 36)
-const MUSIC_BUTTON := Rect2(748, 662, 152, 36)
+const SETTINGS_BUTTON := Rect2(900, 662, 132, 36)
+const MUSIC_BUTTON := Rect2(558, 313, 148, 40)
+const LANGUAGE_BUTTON := Rect2(558, 395, 148, 40)
+const SETTINGS_CLOSE_BUTTON := Rect2(410, 482, 260, 44)
 const BACKGROUND_MUSIC_PATH := "res://assets/music/bumba-crossing.mp3"
 const WEB_FONT_PATH := "res://assets/fonts/LineGapSans-Regular.ttf"
 const UI_TEXT := {
@@ -41,12 +43,14 @@ const UI_TEXT := {
 		"stats": "存活 %.1f 秒   ·   收集 %d   ·   击碎 %d", "final_score": "得分  %05d",
 		"new_best": "新纪录", "switch_language": "English",
 		"music_on": "音乐：开", "music_off": "音乐：关",
+		"settings": "设置", "background_music": "背景音乐", "language": "语言",
+		"settings_hint": "音乐开关不影响音效", "close_settings": "关闭 / ESC",
 		"super_dash": "超级冲刺 %.1f 秒", "super_progress": "超级冲刺 %d/%d",
 		"protection": "保护壳 %.1f 秒"
 	},
 	"en": {
 		"name": "LINE GAP", "title": "LINE GAP", "broken": "BROKEN", "score": "SCORE",
-		"survived": "SURVIVED", "seconds": "s", "best": "BEST SCORE",
+		"survived": "SURVIVED", "seconds": "s", "best": "BEST RECORDS",
 		"move": "WASD / Arrows  Move", "pause_restart": "ESC  Pause    R  Restart",
 		"dash_controls": "LMB / Space  Dash", "dashing": "Dashing", "ready": "Ready",
 		"cooldown": "Cooldown %.1fs", "dead": "RUN OVER", "paused": "PAUSED",
@@ -54,6 +58,8 @@ const UI_TEXT := {
 		"stats": "Survived %.1fs   ·   Orbs %d   ·   Broken %d", "final_score": "Score  %05d",
 		"new_best": "NEW BEST", "switch_language": "中文",
 		"music_on": "Music: On", "music_off": "Music: Off",
+		"settings": "Settings", "background_music": "Background music", "language": "Language",
+		"settings_hint": "Sound effects remain enabled", "close_settings": "Close / Esc",
 		"super_dash": "Super dash %.1fs", "super_progress": "Super dash %d/%d",
 		"protection": "Shield %.1fs"
 	}
@@ -84,6 +90,8 @@ var lives := 1
 var hit_grace := 0.0
 var best := 0
 var old_best := 0
+var best_broken := 0
+var old_best_broken := 0
 var best_time := 0.0
 var flash := 0.0
 var death_age := 0.0
@@ -112,6 +120,8 @@ var music_enabled := true
 var music_player: AudioStreamPlayer
 var web_audio
 var web_sound_names: Dictionary = {}
+var settings_open := false
+var settings_resume_playing := false
 
 
 func _ready() -> void:
@@ -148,6 +158,19 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if settings_open:
+		if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+			_close_settings()
+		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			var click: Vector2 = get_global_transform_with_canvas().affine_inverse() * event.position
+			if MUSIC_BUTTON.has_point(click):
+				set_music_enabled(not music_enabled)
+			elif LANGUAGE_BUTTON.has_point(click):
+				_start_music_if_enabled()
+				set_language("en" if language == "zh" else "zh")
+			elif SETTINGS_CLOSE_BUTTON.has_point(click) or SETTINGS_BUTTON.has_point(click):
+				_close_settings()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		_start_music_if_enabled()
 		if event.keycode == KEY_SPACE:
@@ -169,12 +192,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			begin_run()
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var click: Vector2 = get_global_transform_with_canvas().affine_inverse() * event.position
-		if MUSIC_BUTTON.has_point(click):
-			set_music_enabled(not music_enabled)
-			return
 		_start_music_if_enabled()
-		if LANGUAGE_BUTTON.has_point(click):
-			set_language("en" if language == "zh" else "zh")
+		if SETTINGS_BUTTON.has_point(click):
+			_open_settings()
 			return
 		if phase == Phase.PLAYING:
 			var aim: Vector2 = click - player
@@ -190,6 +210,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		settings_resume_playing = false
 		_reset_movement_input()
 		if phase == Phase.PLAYING:
 			phase = Phase.PAUSED
@@ -210,7 +231,31 @@ func _reset_movement_input() -> void:
 	velocity = Vector2.ZERO
 
 
+func _open_settings() -> void:
+	if settings_open:
+		return
+	settings_open = true
+	settings_resume_playing = phase == Phase.PLAYING
+	_reset_movement_input()
+	if settings_resume_playing:
+		phase = Phase.PAUSED
+	queue_redraw()
+
+
+func _close_settings() -> void:
+	if not settings_open:
+		return
+	settings_open = false
+	_reset_movement_input()
+	if settings_resume_playing and phase == Phase.PAUSED:
+		phase = Phase.PLAYING
+	settings_resume_playing = false
+	queue_redraw()
+
+
 func begin_run() -> void:
+	settings_open = false
+	settings_resume_playing = false
 	_reset_movement_input()
 	phase = Phase.PLAYING
 	player = ARENA.get_center()
@@ -231,6 +276,7 @@ func begin_run() -> void:
 	lives = 1
 	hit_grace = 0.0
 	old_best = best
+	old_best_broken = best_broken
 	flash = 0.0
 	shake = 0.0
 	death_age = 0.0
@@ -289,7 +335,7 @@ func _end_super_dash(protection_elapsed: float = 0.0) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if phase == Phase.PAUSED:
+	if phase == Phase.PAUSED or settings_open:
 		dash_ripple.hide()
 		return
 	visual_time += delta
@@ -614,20 +660,24 @@ func finish_run() -> void:
 	_emit_ring(player, RED, 95.0)
 	_play_sound(death_sound)
 	best = maxi(best, score)
+	best_broken = maxi(best_broken, broken_obstacles)
 	best_time = maxf(best_time, elapsed)
 	if not test_mode:
 		_save_record()
 
 
-func _load_record() -> void:
+func _load_record(path: String = SAVE_PATH) -> void:
 	var config := ConfigFile.new()
 	best = 0
+	best_broken = 0
 	best_time = 0.0
 	var section := "record"
-	if config.load(SAVE_PATH) == OK:
+	if config.load(path) == OK:
 		best = int(config.get_value(section, "score", 0))
+		best_broken = int(config.get_value(section, "broken", 0))
 		best_time = float(config.get_value(section, "seconds", 0.0))
 	old_best = best
+	old_best_broken = best_broken
 
 
 static func language_for_locale(locale: String) -> String:
@@ -731,13 +781,14 @@ func _start_music_if_enabled() -> void:
 		music_player.play()
 
 
-func _save_record() -> void:
+func _save_record(path: String = SAVE_PATH) -> void:
 	var config := ConfigFile.new()
-	config.load(SAVE_PATH)
+	config.load(path)
 	var section := "record"
 	config.set_value(section, "score", best)
+	config.set_value(section, "broken", best_broken)
 	config.set_value(section, "seconds", best_time)
-	var result := config.save(SAVE_PATH)
+	var result := config.save(path)
 	if result != OK:
 		push_warning("Could not save record: %s" % error_string(result))
 
@@ -900,7 +951,9 @@ func _draw() -> void:
 		_draw_world()
 	draw_set_transform(Vector2.ZERO)
 	_draw_footer()
-	if phase == Phase.READY or phase == Phase.PAUSED or (phase == Phase.DEAD and death_age > 0.4):
+	if settings_open:
+		_draw_settings()
+	elif phase == Phase.READY or phase == Phase.PAUSED or (phase == Phase.DEAD and death_age > 0.4):
 		_draw_overlay()
 
 
@@ -967,8 +1020,11 @@ func _draw_header() -> void:
 	_text(ui_text("survived"), Vector2(620, 36), 12, MUTED)
 	_text("%04.1f" % elapsed, Vector2(620, 77), 32, WHITE)
 	_text(ui_text("seconds"), Vector2(714, 76), 13, MUTED)
-	_text(ui_text("best"), Vector2(904, 36), 12, MUTED)
-	_text("%05d" % best, Vector2(904, 77), 28, GOLD)
+	_text(ui_text("best"), Vector2(842, 36), 12, MUTED)
+	_text(ui_text("score"), Vector2(842, 62), 11, MUTED)
+	_text("%05d" % best, Vector2(898, 65), 23, GOLD)
+	_text(ui_text("broken"), Vector2(842, 89), 11, MUTED)
+	_text("%03d" % best_broken, Vector2(898, 91), 20, GOLD)
 
 
 func _draw_demo() -> void:
@@ -1129,19 +1185,30 @@ func _draw_footer() -> void:
 	_text(ui_text("super_progress") % [collected % SUPER_DASH_ORBS, SUPER_DASH_ORBS], Vector2(420, 713), 10, MUTED)
 	if hit_grace > 0:
 		_text(ui_text("protection") % hit_grace, Vector2(660, 713), 10, CYAN)
-	var music_hover := MUSIC_BUTTON.has_point(get_global_mouse_position())
-	var music_color := CYAN if music_enabled else MUTED
-	draw_rect(MUSIC_BUTTON, music_color * Color(1, 1, 1, 0.045 if music_hover else 0.015))
-	draw_rect(MUSIC_BUTTON, music_color * Color(1, 1, 1, 0.6 if music_hover else 0.22), false, 1.0)
-	var music_label := ui_text("music_on" if music_enabled else "music_off")
-	var music_width := font.get_string_size(music_label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-	_text(music_label, Vector2(MUSIC_BUTTON.get_center().x - music_width * 0.5, 685), 13, music_color)
-	var hover := LANGUAGE_BUTTON.has_point(get_global_mouse_position())
-	draw_rect(LANGUAGE_BUTTON, CYAN * Color(1, 1, 1, 0.045 if hover else 0.015))
-	draw_rect(LANGUAGE_BUTTON, CYAN * Color(1, 1, 1, 0.6 if hover else 0.22), false, 1.0)
-	var label := ui_text("switch_language")
+	_draw_settings_button(SETTINGS_BUTTON, ui_text("settings"), CYAN)
+
+
+func _draw_settings_button(rect: Rect2, label: String, color: Color) -> void:
+	var hover := rect.has_point(get_global_mouse_position())
+	draw_rect(rect, color * Color(1, 1, 1, 0.07 if hover else 0.025))
+	draw_rect(rect, color * Color(1, 1, 1, 0.7 if hover else 0.3), false, 1.0)
 	var width := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 13).x
-	_text(label, Vector2(LANGUAGE_BUTTON.get_center().x - width * 0.5, 685), 13, CYAN)
+	_text(label, rect.get_center() + Vector2(-width * 0.5, 5), 13, color)
+
+
+func _draw_settings() -> void:
+	draw_rect(ARENA.grow(-1), BACKGROUND * Color(1, 1, 1, 0.96))
+	var panel := Rect2(340, 222, 400, 326)
+	draw_rect(panel, BACKGROUND)
+	draw_rect(panel, CYAN * Color(1, 1, 1, 0.25), false, 1.0)
+	_center_text(ui_text("settings"), 279, 32, WHITE)
+	draw_line(Vector2(372, 299), Vector2(708, 299), SEPARATOR, 1.0)
+	_text(ui_text("background_music"), Vector2(372, 339), 16, WHITE)
+	_draw_settings_button(MUSIC_BUTTON, ui_text("music_on" if music_enabled else "music_off"), CYAN if music_enabled else MUTED)
+	_text(ui_text("settings_hint"), Vector2(372, 376), 12, MUTED)
+	_text(ui_text("language"), Vector2(372, 421), 16, WHITE)
+	_draw_settings_button(LANGUAGE_BUTTON, ui_text("switch_language"), CYAN)
+	_draw_settings_button(SETTINGS_CLOSE_BUTTON, ui_text("close_settings"), CYAN)
 
 
 func _draw_overlay() -> void:
@@ -1164,7 +1231,7 @@ func _draw_overlay() -> void:
 	draw_rect(button_rect, CYAN * Color(1, 1, 1, 0.07 if hover else 0.025))
 	draw_rect(button_rect, CYAN * Color(1, 1, 1, 0.85 if hover else 0.4), false, 1.0)
 	_center_text(button, 502, 18, CYAN)
-	if phase == Phase.DEAD and score > old_best:
+	if phase == Phase.DEAD and (score > old_best or broken_obstacles > old_best_broken):
 		_center_text(ui_text("new_best"), 559, 15, GOLD)
 	_center_text("Bumba Crossing — Kevin MacLeod (incompetech.com)", 593, 12, MUTED)
 	_center_text("CC BY 4.0 · creativecommons.org/licenses/by/4.0/", 615, 11, MUTED)
