@@ -1,4 +1,4 @@
-LINE GAP - Web edition
+LINE GAP {VERSION} - Web edition
 
 Serve this entire directory through HTTP or HTTPS. Do not double-click
 index.html: file:// cannot load the game's WebAssembly/data reliably.
@@ -8,6 +8,14 @@ http://127.0.0.1:4265 in a current Chrome, Edge or Firefox browser.
 
 WASD / Arrows: move. Left mouse / Space: dash. Space: start/restart/resume.
 Esc: pause/resume. R: restart. Click English / 中文 to switch language.
+
+Every seven orbs open a ten-second super-dash window: no dash cooldown and
+full invulnerability, including when not dashing. Press Space or left-click
+to dash manually; movement keys alone keep normal speed. The dash bar and
+trail turn gold. Manual bursts can turn and shatter barriers at any life
+stage. Finishing grants the existing two-second collision protection.
+Pause freezes all timers; restarting clears progress. Normal cooldown returns
+after the window ends.
 
 Click the game or press Space to enable audio. Background music loops
 continuously. Music: On / Off controls only music; sound effects stay enabled.

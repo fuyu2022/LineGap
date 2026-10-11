@@ -18,6 +18,13 @@ Stage 2: Dashing shatters obstacles; dash cooldown is halved.
 Stage 3: Dash distance is increased.
 Taking damage grants two seconds of invulnerability. Best scores are saved automatically.
 
+Every seven orbs open a ten-second super-dash window: no dash cooldown and
+full invulnerability, including when not dashing. Press Space or left-click
+to dash manually; movement keys alone keep normal speed. Bursts can turn and
+shatter barriers. The dash bar and trail turn gold. Finishing grants the usual
+two-second collision protection. Pause freezes all timers; restarting clears
+the progress. Normal cooldown returns after the window ends.
+
 Engine and third-party notices are in Godot-Licenses.txt.
 
 Music: Click Music: On / Off beside the language button to toggle background

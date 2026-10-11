@@ -21,6 +21,8 @@ const DASH_COOLDOWN := 1.5
 const MAX_LIVES := 3
 const DASH_FULL_DURATION := 0.28
 const HIT_GRACE := 2.0
+const SUPER_DASH_ORBS := 7
+const SUPER_DASH_DURATION := 10.0
 const LANGUAGE_BUTTON := Rect2(916, 662, 116, 36)
 const MUSIC_BUTTON := Rect2(748, 662, 152, 36)
 const BACKGROUND_MUSIC_PATH := "res://assets/music/bumba-crossing.mp3"
@@ -35,7 +37,9 @@ const UI_TEXT := {
 		"start": "空格  开始", "restart": "空格  重开", "resume": "空格  继续",
 		"stats": "存活 %.1f 秒   ·   收集 %d   ·   击碎 %d", "final_score": "得分  %05d",
 		"new_best": "新纪录", "switch_language": "English",
-		"music_on": "音乐：开", "music_off": "音乐：关"
+		"music_on": "音乐：开", "music_off": "音乐：关",
+		"super_dash": "超级冲刺 %.1f 秒", "super_progress": "超级冲刺 %d/%d",
+		"protection": "保护壳 %.1f 秒"
 	},
 	"en": {
 		"name": "LINE GAP", "title": "LINE GAP", "broken": "BROKEN", "score": "SCORE",
@@ -46,7 +50,9 @@ const UI_TEXT := {
 		"start": "Space  Start", "restart": "Space  Restart", "resume": "Space  Resume",
 		"stats": "Survived %.1fs   ·   Orbs %d   ·   Broken %d", "final_score": "Score  %05d",
 		"new_best": "NEW BEST", "switch_language": "中文",
-		"music_on": "Music: On", "music_off": "Music: Off"
+		"music_on": "Music: On", "music_off": "Music: Off",
+		"super_dash": "Super dash %.1fs", "super_progress": "Super dash %d/%d",
+		"protection": "Shield %.1fs"
 	}
 }
 
@@ -90,6 +96,8 @@ var hit_sound: AudioStreamWAV
 var dash_ripple = DashRipple.new()
 var ripple_clip: Control
 var dash_remaining := 0.0
+var super_dash_active := false
+var super_dash_remaining := 0.0
 var dash_cooldown_remaining := 0.0
 var dash_cooldown_duration := DASH_COOLDOWN
 var dash_direction := Vector2.UP
@@ -204,6 +212,8 @@ func begin_run() -> void:
 	dash_ripple.reset()
 	dash_ripple.show()
 	dash_remaining = 0.0
+	super_dash_active = false
+	super_dash_remaining = 0.0
 	dash_cooldown_remaining = 0.0
 	dash_cooldown_duration = DASH_COOLDOWN
 	dash_direction = Vector2.UP
@@ -219,15 +229,36 @@ func _movement_input() -> Vector2:
 
 
 func try_dash(direction: Vector2 = Vector2.ZERO) -> bool:
-	if phase != Phase.PLAYING or dash_remaining > 0 or dash_cooldown_remaining > 0:
+	if phase != Phase.PLAYING:
+		return false
+	if super_dash_active and dash_remaining > 0:
+		dash_direction = direction.normalized() if not direction.is_zero_approx() else last_move_direction
+		last_move_direction = dash_direction
+		return true
+	if dash_remaining > 0 or (not super_dash_active and dash_cooldown_remaining > 0):
 		return false
 	dash_direction = direction.normalized() if not direction.is_zero_approx() else last_move_direction
 	last_move_direction = dash_direction
 	dash_remaining = DASH_FULL_DURATION if lives >= 3 else DASH_DURATION
 	dash_cooldown_duration = DASH_COOLDOWN * (0.5 if lives >= 2 else 1.0)
-	dash_cooldown_remaining = dash_cooldown_duration
+	dash_cooldown_remaining = 0.0 if super_dash_active else dash_cooldown_duration
 	dash_ripple.emit_at(player)
 	return true
+
+
+func _begin_super_dash() -> void:
+	super_dash_active = true
+	super_dash_remaining = SUPER_DASH_DURATION
+	dash_cooldown_remaining = 0.0
+	_emit_ring(player, GOLD, 72.0)
+
+
+func _end_super_dash(protection_elapsed: float = 0.0) -> void:
+	super_dash_active = false
+	super_dash_remaining = 0.0
+	dash_cooldown_remaining = 0.0
+	hit_grace = maxf(hit_grace, maxf(0.0, HIT_GRACE - protection_elapsed))
+	_emit_ring(player, CYAN, 40.0)
 
 
 func _physics_process(delta: float) -> void:
@@ -254,12 +285,16 @@ func advance_game(delta: float, direction: Vector2) -> void:
 	hit_grace = maxf(0.0, hit_grace - delta)
 	score = int(elapsed * 10.0) + collected * 50
 	var previous_player := player
+	var super_dash_this_frame := super_dash_active
+	var super_time := minf(delta, super_dash_remaining)
 	var dash_time := minf(delta, dash_remaining)
 	var dash_end_player := player
 	dash_cooldown_remaining = maxf(0, dash_cooldown_remaining - delta)
 	var move_direction := direction.normalized()
 	if not move_direction.is_zero_approx():
 		last_move_direction = move_direction
+		if super_dash_active and dash_remaining > 0:
+			dash_direction = move_direction
 	var normal_time := delta
 	if dash_remaining > 0:
 		velocity = dash_direction * DASH_SPEED
@@ -273,6 +308,10 @@ func advance_game(delta: float, direction: Vector2) -> void:
 		velocity = velocity.move_toward(move_direction * PLAYER_SPEED, 2400.0 * normal_time)
 		player += velocity * normal_time
 	player = _clamp_player(player)
+	if super_dash_this_frame:
+		super_dash_remaining = maxf(0.0, super_dash_remaining - delta)
+		if super_dash_remaining < 0.000001:
+			_end_super_dash(maxf(0.0, delta - super_time))
 	trail.push_front(player)
 	if trail.size() > 22:
 		trail.pop_back()
@@ -294,7 +333,12 @@ func advance_game(delta: float, direction: Vector2) -> void:
 		if dash_time > 0 and _path_hits_obstacle(previous_player, dash_end_player, before, dash_ends):
 			var crossing = Geometry2D.segment_intersects_segment(previous_player, dash_end_player, ends[0], ends[1])
 			var impact: Vector2 = crossing if crossing is Vector2 else ends[0] + (ends[1] - ends[0]) * clampf((dash_end_player - ends[0]).dot(ends[1] - ends[0]) / maxf(0.001, ends[0].distance_squared_to(ends[1])), 0, 1)
-			if lives >= 2:
+			var super_dash_time := minf(dash_time, super_time)
+			var super_dash_end := _clamp_player(previous_player + dash_direction * DASH_SPEED * super_dash_time)
+			var super_fraction := super_dash_time / delta if delta > 0 else 0.0
+			var super_ends := PackedVector2Array([before[0].lerp(ends[0], super_fraction), before[1].lerp(ends[1], super_fraction)])
+			var struck_during_super := super_dash_this_frame and super_dash_time > 0 and _path_hits_obstacle(previous_player, super_dash_end, before, super_ends)
+			if lives >= 2 or struck_during_super:
 				_shatter_obstacle(index, ends, impact)
 			elif item["ghost_remaining"] <= 0:
 				item["ghost_remaining"] = float(item["warning"])
@@ -324,7 +368,7 @@ func _gain_ring() -> void:
 
 
 func _take_hit() -> void:
-	if phase != Phase.PLAYING or hit_grace > 0:
+	if phase != Phase.PLAYING or hit_grace > 0 or super_dash_active:
 		return
 	lives -= 1
 	if lives <= 0:
@@ -477,6 +521,8 @@ func _update_pickup(delta: float, previous_player: Vector2 = Vector2.INF) -> voi
 			_emit_ring(pickup, GOLD, 58.0)
 			_emit_sparks(pickup, GOLD, 12)
 			_play_sound(collect_sound)
+			if collected % SUPER_DASH_ORBS == 0:
+				_begin_super_dash()
 		elif pickup_age > 9.0:
 			pickup_active = false
 			pickup_wait = 0.8
@@ -502,7 +548,12 @@ func finish_run() -> void:
 	if phase != Phase.PLAYING:
 		return
 	phase = Phase.DEAD
+	if super_dash_active:
+		dash_remaining = 0.0
+	super_dash_active = false
+	super_dash_remaining = 0.0
 	lives = 0
+	hit_grace = 0.0
 	death_age = 0.0
 	flash = 0.65
 	shake = 5.0
@@ -909,14 +960,15 @@ func _draw_world() -> void:
 		draw_line(pickup + Vector2(-19, 0), pickup + Vector2(-15, 0), tint, 1, true)
 		draw_line(pickup + Vector2(15, 0), pickup + Vector2(19, 0), tint, 1, true)
 	if phase != Phase.DEAD:
+		var trail_color := GOLD if super_dash_active else CYAN
 		for index in range(1, trail.size()):
 			var alpha := (1.0 - float(index) / trail.size()) * 0.32
-			draw_line(trail[index - 1], trail[index], CYAN * Color(1, 1, 1, alpha), 3 if dash_remaining > 0 else 2, true)
+			draw_line(trail[index - 1], trail[index], trail_color * Color(1, 1, 1, alpha), 3 if dash_remaining > 0 else 2, true)
 		if lives >= 2:
 			_draw_gold_ring(player, 17)
-		if hit_grace > 0:
+		if hit_grace > 0 or super_dash_active:
 			draw_arc(player, 18 + _ring_layers() * 6, visual_time * 3, visual_time * 3 + TAU * 0.8, 48,
-				CYAN * Color(1, 1, 1, 0.35 + hit_grace / HIT_GRACE * 0.45), 1.5, true)
+				(GOLD if super_dash_active else CYAN) * Color(1, 1, 1, 0.8 if super_dash_active else 0.35 + hit_grace / HIT_GRACE * 0.45), 1.5, true)
 		draw_circle(player, 13, CYAN * Color(1, 1, 1, 0.07))
 		draw_arc(player, 11, 0, TAU, 40, CYAN * Color(1, 1, 1, 0.35), 1, true)
 		draw_circle(player, PLAYER_RADIUS, WHITE if dash_remaining > 0 else CYAN, true, -1, true)
@@ -1011,11 +1063,19 @@ func _draw_footer() -> void:
 	_text(ui_text("pause_restart"), Vector2(48, 704), 11, MUTED)
 	_text(ui_text("dash_controls"), Vector2(420, 679), 12, CYAN)
 	var dash_label := ui_text("dashing") if dash_remaining > 0 else (ui_text("ready") if dash_cooldown_remaining <= 0 else ui_text("cooldown") % dash_cooldown_remaining)
-	_text(dash_label, Vector2(552, 679), 11, CYAN if dash_cooldown_remaining <= 0 else MUTED)
+	if super_dash_active:
+		dash_label = ui_text("super_dash") % super_dash_remaining
+	var dash_color := GOLD if super_dash_active else CYAN
+	_text(dash_label, Vector2(552, 679), 11, dash_color if dash_cooldown_remaining <= 0 else MUTED)
 	draw_line(Vector2(420, 695), Vector2(646, 695), SEPARATOR, 2, true)
 	var ready_fraction := clampf(1.0 - dash_cooldown_remaining / dash_cooldown_duration, 0.0, 1.0)
+	if super_dash_active:
+		ready_fraction = clampf(super_dash_remaining / SUPER_DASH_DURATION, 0.0, 1.0)
 	if ready_fraction > 0:
-		draw_line(Vector2(420, 695), Vector2(420 + 226 * ready_fraction, 695), CYAN, 2, true)
+		draw_line(Vector2(420, 695), Vector2(420 + 226 * ready_fraction, 695), dash_color, 2, true)
+	_text(ui_text("super_progress") % [collected % SUPER_DASH_ORBS, SUPER_DASH_ORBS], Vector2(420, 713), 10, MUTED)
+	if hit_grace > 0:
+		_text(ui_text("protection") % hit_grace, Vector2(660, 713), 10, CYAN)
 	var music_hover := MUSIC_BUTTON.has_point(get_global_mouse_position())
 	var music_color := CYAN if music_enabled else MUTED
 	draw_rect(MUSIC_BUTTON, music_color * Color(1, 1, 1, 0.045 if music_hover else 0.015))

@@ -21,7 +21,8 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'web\audio.js') -Destination (Jo
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\music\bumba-crossing.mp3') -Destination (Join-Path $lineWebDir 'audio\bumba-crossing.mp3') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\music\ATTRIBUTION.txt') -Destination (Join-Path $lineWebDir 'Music-Credits.txt') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\fonts\OFL.txt') -Destination (Join-Path $lineWebDir 'Font-License.txt') -Force
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'packaging\README-Web.txt') -Destination (Join-Path $lineWebDir 'README.txt') -Force
+$lineWebReadme = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'packaging\README-Web.txt') -Raw
+$lineWebReadme.Replace('{VERSION}', $lineVersionMatch.Groups[1].Value) | Set-Content -LiteralPath (Join-Path $lineWebDir 'README.txt') -Encoding utf8
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'web\preview.cmd') -Destination (Join-Path $lineWebDir 'preview.cmd') -Force
 & $GodotPath --headless --path $PSScriptRoot --script res://tests/export_licenses.gd -- (Join-Path $lineWebDir 'Godot-Licenses.txt')
 if ($LASTEXITCODE -ne 0) { throw 'License export failed.' }

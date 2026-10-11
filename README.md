@@ -1,104 +1,46 @@
 # 线隙 · LINE GAP
 
-当前版本：`v0.1.0-beta`。
+版本：`0.2.0-beta`。一个由点、线、圆环组成的 Godot 生存游戏。
 
-一个由代码绘制的点、线、圆环组成的 Godot 4.7 躲避游戏。没有图片素材。
-
-双击 `play.cmd` 游玩；双击 `editor.cmd` 打开编辑器。也可以在 Godot 中导入本目录的 `project.godot`。
+[在线游玩](https://fuyu2022.github.io/LineGap/)
 
 ## 操作
 
 - WASD / 方向键：移动。
-- 鼠标左键：游玩时沿玩家到点击位置的方向冲刺。
-- 空格：游玩时冲刺；标题页开始，失败后重开，暂停时继续。
-- ESC：暂停或继续。切换到其他窗口时自动暂停。
-- R：立即重开。
-- 开始 / 重开 / 继续按钮也可以点击。
-- 右下角 English / 中文：切换界面语言，选择自动保存。首次启动按系统语言选择，中文语言环境使用中文，其余使用英文。切换会保留当前进度、暂停状态与冲刺冷却。
-- 右下角“音乐：开 / 关”：只切换背景音乐，音效照常播放。默认开启，选择自动保存。关闭后再开启从原位置继续，暂停和重开游戏不会重置音乐。网页版在首次点击或按键后开始播放。
+- 鼠标左键 / 空格：冲刺；空格也用于开始、重开和继续。
+- ESC：暂停 / 继续；切换窗口时自动暂停。
+- R：重开。
+- 右下角切换中英文和背景音乐，选择自动保存。音乐开关不影响音效；网页版首次点击或按键后启用声音。
 
-## 冲刺
+## 玩法
 
-- 鼠标左键沿玩家到点击位置的方向冲刺；空格沿当前按下的方向冲刺，没有按方向时使用上一次移动方向，开局默认向上。两种方式共用冷却，点击玩家本体的中心不触发冲刺。
-- 默认冲刺持续 0.16 秒、距离约 160 像素、冷却 1.5 秒。第二阶段金圈虚化时冷却减半为 0.75 秒，第三阶段金圈变实时冲刺距离增加到 280 像素；速度保持每秒 1000 像素。底部显示冷却进度和剩余时间。
-- 冲刺方向在这一小段时间内固定，斜向冲刺与直向距离相同。
-- 起点留下青色光圈，中心不跟着玩家移动，逐渐扩大、淡出，约 0.9 秒后消失。
-- 第一阶段冲刺接触障碍会使它恢复为出现时的金色预警虚线，暂时失去碰撞效果。虚化时长与该障碍的初始预警一致：横线、竖线为 0.8 秒，旋转线为 1.15 秒，之后恢复。第二、三阶段冲刺会击碎障碍并留下短暂的线段碎片；预警线也适用。普通移动碰到白色实线会损失一条命，最后一条命耗尽时结束。冲刺结束后不再具有击碎能力，到场地边缘时不会越界。
-- 拾取金色光球立即清空冲刺冷却，可以继续冲刺；冲刺穿过光球也会拾取。若光球在冲刺中被拾取，当前冲刺正常完成后即可再次使用。
-- 暂停会冻结冲刺、冷却和光圈；重开清空效果，恢复冲刺可用状态。
+躲避白色实线，金色虚线为预警。光球每个加 50 分、增加一条命并清空冲刺冷却，最多三条命；存活每秒加 10 分。受伤后获得 2 秒保护，最后一条命耗尽时结束。
 
-## 金色光圈与阶段能力
+- 一条命：冲刺使障碍暂时虚化，距离 160 像素，冷却 1.5 秒。
+- 两条命：冲刺可击碎障碍，冷却减为 0.75 秒。
+- 三条命：保留击碎能力，冲刺距离增加到 280 像素。
 
-开局一条命就是第一阶段，没有金色光圈。每吃一个光球增加一条命：第二阶段有一层半透明的金色虚圈，第三阶段同一个金圈变为明亮实线。最多三条命，玩家周围始终最多一层金色光圈。光圈与玩家同心，顶部金色生命标记同步显示虚实状态；光圈不扩大碰撞范围。
+每收集 7 个光球进入 **10 秒超级冲刺状态**：全程无敌、冲刺无冷却，仍需手动按空格或点击鼠标冲刺，冲刺中可转向。状态条和拖尾变为金色；结束后再获得 2 秒保护。暂停冻结计时，重开清空本局进度。最高分和最长存活时间自动保存。
 
-- 第一阶段（一条命、无金圈）：冲刺使障碍按初始预警的颜色、样式和时长虚化。障碍继续运动，虚化不计入击碎数量。
-- 第二阶段（两条命、一层金圈）：冲刺可击碎障碍，冷却减半。
-- 第三阶段（三条命、一层实金圈）：保留第二阶段能力，冲刺距离加长。
+## 本地运行与打包
 
-普通碰撞受伤扣一条命并获得 2 秒保护：第三阶段的实圈退为第二阶段虚圈，再受伤时虚圈消失，回到第一阶段。第一阶段受伤结束游戏。保护期间用青色弧线表示，普通碰撞不会使障碍虚化。拾取光球仍然加 50 分并重置冲刺冷却，满生命时也有效。阶段改变影响下一次冲刺距离与冷却，已经开始的冲刺与冷却正常完成；重开恢复一条命并清空光圈。
-
-## 躲避与计分
-
-白色实线为障碍，金色虚线表示尚未激活的障碍。金色光点每个加 50 分，存活每秒加 10 分。障碍按定时规则产生，存活 9 秒后可出现旋转障碍。横线和竖线保持方向，线条平移固定为每秒 90 像素；难度通过密度变化。
-
-顶部“击碎”实时显示本局撞碎的障碍数量，结束时也会显示。一次冲刺击碎多条障碍会逐条计数，预警线也计入；新一局从零开始。
-
-最高分、最长存活时间保存在 Godot 用户数据目录的 `records.cfg`，既有游戏纪录保留。
-
-游戏逻辑在 `scripts/game.gd`，冲刺光圈在 `scripts/dash_ripple.gd`。收集、击碎和死亡音效由代码合成：击碎是清脆的高频碎裂声，带短暂的碎片叮响，死亡是带低频的下坠撞击声。音效使用独立播放器，连续击碎和拾取不会互相截断，并经过限幅处理。项目不采集系统音频，不依赖麦克风或后台采集程序。窗口可缩放。
-
-背景音乐使用独立播放器循环播放 `assets/music/bumba-crossing.mp3`，以较低音量播放，不影响音效总线。曲目为 [Bumba Crossing](https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1500031)，作者 Kevin MacLeod（incompetech.com），授权 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)。原始 MP3 内容未修改，仅重命名；游戏内降低播放音量并循环播放。标题、暂停和结束页显示署名，完整说明见 `assets/music/ATTRIBUTION.txt`，Windows 压缩包同时包含 `Music-Credits.txt`。
-
-静态背景独立缓存，点阵通过几何实例一次绘制；碎片与火花按组批量提交，保留碎裂、发光与淡出效果。碰撞逻辑维持每秒 120 次更新，绘制只在每个显示帧提交一次，避免物理补帧时重复重建整幅画面。
-
-窗口按实际分辨率绘制，支持 HiDPI；系统字体使用 MSDF 字形渲染，保持放大后的文字清晰度。
-
-## 验证
+源码用 Godot 4.7.2 打开 `project.godot`，或双击 `play.cmd` 游玩、`editor.cmd` 编辑。打包需安装匹配的导出模板：
 
 ```powershell
-& 'D:\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64_console.exe' --headless --path 'D:\01mytools\LineGap' --script res://tests/game_test.gd
-& 'D:\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64_console.exe' --headless --path 'D:\01mytools\LineGap' --script res://tests/dash_test.gd
-& 'D:\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64_console.exe' --headless --path 'D:\01mytools\LineGap' --script res://tests/stages_test.gd
+.\build.ps1      # Windows x64 免安装版
+.\build-web.ps1  # Web 版
 ```
 
-`tests/dash_visual_check.gd` 渲染检查冲刺、起点光圈、冷却和恢复状态。验证截图位于忽略版本管理的 `artifacts/`。
+两个脚本可通过 `-GodotPath` 指定引擎路径，压缩包生成到 `builds/`，文件名自动读取版本号。Windows 版解压后运行 `LineGap.exe`，保留同目录的 `LineGap.pck`。
 
-`tests/localization_check.gd` 验证中英文文本、排版宽度及各阶段语言切换，传入 `-- visual` 可生成两种语言的标题、游戏、暂停和结束截图。
+Web 版需发布整个 `builds/LineGap-Web/` 目录，不能直接双击 HTML。本地预览可运行导出目录里的 `preview.cmd`（需要 Python）。测试脚本在 `tests/`，截图和报告在 `artifacts/`。
 
-`tests/performance_check.gd` 使用真实窗口连续冲刺、击碎多个障碍，记录帧耗时、绘制调用与持续运行数据。测试不写入游戏纪录，退出后不保留窗口。示例：
+## GitHub Pages
 
-```powershell
-& 'D:\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64_console.exe' --path 'D:\01mytools\LineGap' --script res://tests/performance_check.gd -- current 120
-```
+在 [Pages 设置](https://github.com/fuyu2022/LineGap/settings/pages) 中将 Source 设为 **GitHub Actions**。推送源码到 `main` 后，工作流会自动导出并发布 Web 版；在 [Actions](https://github.com/fuyu2022/LineGap/actions) 查看进度。无需提交 `builds/`，也无需额外配置 Token。
 
-## Windows 打包
+## 署名
 
-运行 `build.ps1` 可导出 Windows x64 免安装版，需 Godot 4.7.2 与匹配的 Windows 导出模板。打包文件名自动读取 `project.godot` 的版本号，当前成品为 `builds/LineGap-v0.1.0-beta-Windows-x64.zip`。解压后双击 `LineGap.exe`，并保留同目录的 `LineGap.pck`。压缩包包含程序、游戏数据、操作说明及引擎许可证。
+背景音乐：[Bumba Crossing](https://incompetech.com/music/royalty-free/index.html?isrc=USUAN1500031)，Kevin MacLeod（incompetech.com），[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)。原始音频未修改，游戏内降低音量并循环播放；完整说明见 [音乐署名](assets/music/ATTRIBUTION.txt)。
 
-`export_presets.cfg` 仅选择主场景及其运行依赖，不导出测试、截图、日志和开发工具。源码的启动脚本使用本机已有 Godot 的路径，免安装版运行时不依赖该路径。
-
-## Web 导出与 GitHub Pages
-
-运行 `build-web.ps1`，需要 Godot 4.7.2 及匹配的单线程 Web 导出模板。可用 `-GodotPath` 指定引擎路径。成品目录是 `builds/LineGap-Web/`，压缩包是 `builds/LineGap-v0.1.0-beta-Web.zip`。
-
-Web 预设使用 Compatibility 渲染、单线程，关闭扩展及 PWA，不需要 COOP/COEP 响应头。`index.html`、引擎文件、`audio.js`、`audio/` 和许可文件必须一起发布。资源采用相对地址，可部署到 GitHub Pages 的仓库子路径。解压后可用 Python 运行 `preview.cmd` 预览；不能通过双击 `index.html` 的 `file://` 地址运行。源码目录预览也可执行：
-
-```powershell
-python -m http.server 4265 --bind 127.0.0.1 --directory builds/LineGap-Web
-```
-
-浏览器打开 `http://127.0.0.1:4265/`。首次点击游戏或按空格启用声音。音乐循环播放，开关只影响音乐；关闭后再开启保留位置，重开、暂停和结束页面保持音乐。纪录、语言和音乐开关保存在当前站点的浏览器数据中，清除站点数据会清除这些设置。
-
-Web 音效由 `tools/export_web_audio.gd` 调用与桌面版相同的合成代码生成四个 WAV，每次构建重新生成。`web/audio.js` 使用 Web Audio 播放独立音效，并限制重叠数量、压缩混音和设置最终输出上限；音乐使用循环的 HTML 音频播放器接入独立音量通道。Godot 在 Web 上使用 Dummy 音频驱动，避免再启动一个未使用的混音器。Windows 继续使用原有 Godot 播放器。
-
-网页字体是 Noto Sans SC 的子集，使用 SIL OFL 1.1，字体文件和许可位于 `assets/fonts/`。增加新文字时，可运行 `python tools/subset_web_font.py` 重新生成字体（需要 Python 的 fontTools 包；首次会下载原始字体），然后重新导出。网页底部包含音乐来源、CC BY 4.0、引擎和字体许可证链接。
-
-在 GitHub Pages 中发布成品目录全部内容，并把 `index.html` 放在发布目录根部；从分支发布时同时保留 `.nojekyll`。本地导出不会自动上传或启用 Pages。
-
-### GitHub Actions 自动发布
-
-仓库已经包含 `.github/workflows/pages.yml`。在 [仓库 Pages 设置](https://github.com/fuyu2022/LineGap/settings/pages) 的 **Build and deployment → Source** 中选择 **GitHub Actions**，然后提交游戏源码、资源和工作流到 `main` 分支。无需把 `builds/` 导出文件提交到 Git。
-
-推送到 `main` 或手动触发工作流后，GitHub 的 Windows runner 下载并缓存 Godot 4.7.2 和对应的单线程 Web 模板，运行 `build-web.ps1`，验证游戏逻辑及音频文件，上传整个 `builds/LineGap-Web/` 目录，然后部署到 Pages。工作流使用 GitHub 自动提供的令牌，不需要手动创建 Token 或添加 Secret。
-
-在 [Actions 页面](https://github.com/fuyu2022/LineGap/actions) 查看 **Deploy LINE GAP to GitHub Pages**。两个任务 `build` 和 `deploy` 成功后，访问 `https://fuyu2022.github.io/LineGap/`。以后更新源码并推送到 `main` 就会自动更新网页；也可在 Actions 工作流页面点击 **Run workflow** 重试。未来升级 Godot 时，同时更新工作流中的 `GODOT_VERSION` 和项目/本地导出使用的版本。
+Web 字体为 Noto Sans SC 的子集，使用 [SIL OFL 1.1](assets/fonts/OFL.txt)。导出包包含音乐、字体和 Godot 引擎的许可信息。
