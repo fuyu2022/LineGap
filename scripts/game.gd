@@ -22,7 +22,8 @@ const MAX_LIVES := 3
 const DASH_FULL_DURATION := 0.28
 const HIT_GRACE := 2.0
 const SUPER_DASH_ORBS := 7
-const SUPER_DASH_DURATION := 10.0
+const SUPER_DASH_DURATION := 7.0
+const SUPER_MOVE_MULTIPLIER := 2.5
 const LANGUAGE_BUTTON := Rect2(916, 662, 116, 36)
 const MUSIC_BUTTON := Rect2(748, 662, 152, 36)
 const BACKGROUND_MUSIC_PATH := "res://assets/music/bumba-crossing.mp3"
@@ -247,6 +248,8 @@ func try_dash(direction: Vector2 = Vector2.ZERO) -> bool:
 
 
 func _begin_super_dash() -> void:
+	if not super_dash_active and dash_remaining <= 0:
+		velocity *= SUPER_MOVE_MULTIPLIER
 	super_dash_active = true
 	super_dash_remaining = SUPER_DASH_DURATION
 	dash_cooldown_remaining = 0.0
@@ -296,6 +299,7 @@ func advance_game(delta: float, direction: Vector2) -> void:
 		if super_dash_active and dash_remaining > 0:
 			dash_direction = move_direction
 	var normal_time := delta
+	var super_move_time := minf(maxf(0.0, delta - dash_time), maxf(0.0, super_time - dash_time))
 	if dash_remaining > 0:
 		velocity = dash_direction * DASH_SPEED
 		player += velocity * dash_time
@@ -303,14 +307,25 @@ func advance_game(delta: float, direction: Vector2) -> void:
 		dash_remaining = maxf(0, dash_remaining - dash_time)
 		normal_time -= dash_time
 		if dash_remaining == 0:
-			velocity = move_direction * PLAYER_SPEED
-	if normal_time > 0:
-		velocity = velocity.move_toward(move_direction * PLAYER_SPEED, 2400.0 * normal_time)
-		player += velocity * normal_time
+			velocity = move_direction * PLAYER_SPEED * (SUPER_MOVE_MULTIPLIER if super_time > dash_time else 1.0)
+	var super_walk_start := dash_end_player if dash_time > 0 else previous_player
+	var super_walk_end := super_walk_start
+	if super_move_time > 0:
+		velocity = velocity.move_toward(move_direction * PLAYER_SPEED * SUPER_MOVE_MULTIPLIER, 2400.0 * SUPER_MOVE_MULTIPLIER * super_move_time)
+		player += velocity * super_move_time
+		super_walk_end = _clamp_player(player)
+	var ordinary_move_time := maxf(0.0, normal_time - super_move_time)
+	if ordinary_move_time > 0:
+		if super_move_time > 0:
+			velocity /= SUPER_MOVE_MULTIPLIER
+		velocity = velocity.move_toward(move_direction * PLAYER_SPEED, 2400.0 * ordinary_move_time)
+		player += velocity * ordinary_move_time
 	player = _clamp_player(player)
 	if super_dash_this_frame:
 		super_dash_remaining = maxf(0.0, super_dash_remaining - delta)
 		if super_dash_remaining < 0.000001:
+			if dash_remaining <= 0 and super_move_time > 0 and ordinary_move_time <= 0:
+				velocity /= SUPER_MOVE_MULTIPLIER
 			_end_super_dash(maxf(0.0, delta - super_time))
 	trail.push_front(player)
 	if trail.size() > 22:
@@ -330,15 +345,24 @@ func advance_game(delta: float, direction: Vector2) -> void:
 		var ends := obstacle_endpoints(item)
 		var dash_fraction := dash_time / delta if delta > 0 else 0.0
 		var dash_ends := PackedVector2Array([before[0].lerp(ends[0], dash_fraction), before[1].lerp(ends[1], dash_fraction)])
+		if super_dash_this_frame and super_time > 0:
+			var super_dash_time := minf(dash_time, super_time)
+			var super_fraction := super_time / delta if delta > 0 else 0.0
+			var super_ends := PackedVector2Array([before[0].lerp(ends[0], super_fraction), before[1].lerp(ends[1], super_fraction)])
+			var super_dash_end := _clamp_player(previous_player + dash_direction * DASH_SPEED * super_dash_time)
+			var super_dash_fraction := super_dash_time / delta if delta > 0 else 0.0
+			var super_dash_ends := PackedVector2Array([before[0].lerp(ends[0], super_dash_fraction), before[1].lerp(ends[1], super_dash_fraction)])
+			var struck_during_super := super_dash_time > 0 and _path_hits_obstacle(previous_player, super_dash_end, before, super_dash_ends)
+			if not struck_during_super and super_move_time > 0:
+				struck_during_super = _path_hits_obstacle(super_walk_start, super_walk_end, dash_ends, super_ends)
+			if struck_during_super:
+				var impact := Geometry2D.get_closest_point_to_segment(super_walk_end if super_move_time > 0 else super_dash_end, ends[0], ends[1])
+				_shatter_obstacle(index, ends, impact)
+				continue
 		if dash_time > 0 and _path_hits_obstacle(previous_player, dash_end_player, before, dash_ends):
 			var crossing = Geometry2D.segment_intersects_segment(previous_player, dash_end_player, ends[0], ends[1])
 			var impact: Vector2 = crossing if crossing is Vector2 else ends[0] + (ends[1] - ends[0]) * clampf((dash_end_player - ends[0]).dot(ends[1] - ends[0]) / maxf(0.001, ends[0].distance_squared_to(ends[1])), 0, 1)
-			var super_dash_time := minf(dash_time, super_time)
-			var super_dash_end := _clamp_player(previous_player + dash_direction * DASH_SPEED * super_dash_time)
-			var super_fraction := super_dash_time / delta if delta > 0 else 0.0
-			var super_ends := PackedVector2Array([before[0].lerp(ends[0], super_fraction), before[1].lerp(ends[1], super_fraction)])
-			var struck_during_super := super_dash_this_frame and super_dash_time > 0 and _path_hits_obstacle(previous_player, super_dash_end, before, super_ends)
-			if lives >= 2 or struck_during_super:
+			if lives >= 2:
 				_shatter_obstacle(index, ends, impact)
 			elif item["ghost_remaining"] <= 0:
 				item["ghost_remaining"] = float(item["warning"])

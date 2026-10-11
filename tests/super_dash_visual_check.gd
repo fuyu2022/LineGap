@@ -35,6 +35,13 @@ func run() -> void:
 		game.advance_game(1.0 / 120, Vector2.RIGHT)
 		game._update_effects(1.0 / 120)
 	await capture(game, "super-dash-invincible-walk")
+	game.obstacles.append({"center": game.player + Vector2(35, 0), "velocity": Vector2.ZERO,
+		"angle": PI / 2, "spin": 0.0, "length": 180.0, "age": 2.0, "warning": 0.8, "life": 99.0})
+	game.advance_game(0.06, Vector2.RIGHT)
+	game._update_effects(0.02)
+	if game.broken_obstacles != 1 or game.dash_remaining != 0 or game.fragments.is_empty():
+		failures.append("Walking contact did not produce shatter effects without a dash")
+	await capture(game, "super-contact-shatter")
 	game.try_dash(Vector2.RIGHT)
 	game.advance_game(0.08, Vector2.RIGHT)
 	var image := await capture(game, "super-dash-gold")
