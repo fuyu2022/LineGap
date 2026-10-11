@@ -58,6 +58,7 @@ func run() -> void:
 		game.advance_game(0.1, Vector2.ZERO)
 		expect(game.lives == 1 and game.phase == Game.Phase.PLAYING and game.obstacles.size() == 1, "Initial-stage dash preserves the player and struck barrier")
 		expect(game.obstacles[0]["ghost_remaining"] == 0.8 and game.broken_obstacles == 0 and game.fragments.is_empty(), "Initial-stage dash uses the obstacle's spawn warning duration without shattering")
+		expect(game.score == 1, "Phasing a solid or warning barrier awards no shatter bonus")
 		game.advance_game(0.06, Vector2.ZERO)
 		expect(game.hit_grace == 0 and game.obstacles[0]["ghost_remaining"] < 0.8, "Phasing does not consume life or repeatedly reset its timer")
 	quiet_run(game)

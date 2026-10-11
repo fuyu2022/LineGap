@@ -16,6 +16,7 @@ Collect gold orbs to gain points, refill your dash and gain lives (up to three).
 Stage 1: Dashing temporarily phases obstacles.
 Stage 2: Dashing shatters obstacles; dash cooldown is halved.
 Stage 3: Dash distance is increased.
+Each shattered barrier awards 15 points.
 Taking damage grants two seconds of invulnerability. Best scores are saved automatically.
 
 Every seven orbs open a seven-second super-dash window: no dash cooldown and

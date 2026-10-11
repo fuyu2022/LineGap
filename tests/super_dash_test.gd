@@ -53,6 +53,7 @@ func run() -> void:
 	game.lives = 1
 	game.advance_game(0.01, Vector2.ZERO)
 	expect(game.phase == Game.Phase.PLAYING and game.lives == 1 and game.obstacles.is_empty() and game.broken_obstacles == 2 and not game.fragments.is_empty(), "Stationary super contact shatters overlapping barriers at one life without starting a dash")
+	expect(game.score == 382, "Two super contact shatters add 30 points to orb and time scores")
 	game._take_hit()
 	expect(game.lives == 1, "Direct collision damage also respects super invincibility")
 	game.advance_game(3.0, Vector2.ZERO)
@@ -103,8 +104,11 @@ func run() -> void:
 	game.obstacles.append(barrier(game.player + Vector2(3, 0)))
 	game.velocity = Vector2.ZERO
 	var broken_before_protection: int = game.broken_obstacles
+	var score_before_protection: int = game.score
+	var elapsed_before_protection: float = game.elapsed
 	game.advance_game(1.9, Vector2.ZERO)
 	expect(game.lives == 3 and game.phase == Game.Phase.PLAYING and game.obstacles.size() == 2 and game.broken_obstacles == broken_before_protection, "Post-window protection ignores damage but does not shatter contacted barriers")
+	expect(game.score - score_before_protection == int(game.elapsed * 10) - int(elapsed_before_protection * 10), "Protected contact awards no shatter points while time scoring continues")
 	super_left = game.hit_grace
 	game.phase = Game.Phase.PAUSED
 	game._physics_process(10)

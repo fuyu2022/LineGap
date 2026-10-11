@@ -16,7 +16,7 @@ Normal movement speed returns when the window ends. The dash bar and
 trail turn gold. Contacting any barrier shatters it throughout the window,
 including while walking or standing still. Manual bursts can turn.
 Finishing grants the existing two-second collision protection.
-Pause freezes all timers; restarting clears progress. Normal cooldown returns
+Each shattered barrier awards 15 points. Pause freezes all timers; restarting clears progress. Normal cooldown returns
 after the window ends.
 
 Click the game or press Space to enable audio. Background music loops

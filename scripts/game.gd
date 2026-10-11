@@ -24,6 +24,7 @@ const HIT_GRACE := 2.0
 const SUPER_DASH_ORBS := 7
 const SUPER_DASH_DURATION := 7.0
 const SUPER_MOVE_MULTIPLIER := 2.0
+const SHATTER_SCORE := 15
 const LANGUAGE_BUTTON := Rect2(916, 662, 116, 36)
 const MUSIC_BUTTON := Rect2(748, 662, 152, 36)
 const BACKGROUND_MUSIC_PATH := "res://assets/music/bumba-crossing.mp3"
@@ -283,10 +284,14 @@ func _process(_delta: float) -> void:
 	dash_ripple.queue_redraw()
 
 
+func _update_score() -> void:
+	score = int(elapsed * 10.0) + collected * 50 + broken_obstacles * SHATTER_SCORE
+
+
 func advance_game(delta: float, direction: Vector2) -> void:
 	elapsed += delta
 	hit_grace = maxf(0.0, hit_grace - delta)
-	score = int(elapsed * 10.0) + collected * 50
+	_update_score()
 	var previous_player := player
 	var super_dash_this_frame := super_dash_active
 	var super_time := minf(delta, super_dash_remaining)
@@ -424,6 +429,7 @@ func _shatter_obstacle(index: int, ends: PackedVector2Array, impact: Vector2) ->
 	var color := WHITE if item["age"] >= item["warning"] else GOLD
 	obstacles.remove_at(index)
 	broken_obstacles += 1
+	_update_score()
 	_play_sound(shatter_sound)
 	var visible := _clip_to_arena(ends[0], ends[1])
 	if visible.is_empty():
@@ -538,7 +544,7 @@ func _update_pickup(delta: float, previous_player: Vector2 = Vector2.INF) -> voi
 		if point_segment_distance(pickup, start, player) < 20.0:
 			collected += 1
 			_gain_ring()
-			score = int(elapsed * 10.0) + collected * 50
+			_update_score()
 			pickup_active = false
 			pickup_wait = 2.2
 			dash_cooldown_remaining = 0.0
