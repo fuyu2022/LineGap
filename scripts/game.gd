@@ -25,6 +25,7 @@ const SUPER_DASH_ORBS := 7
 const SUPER_DASH_DURATION := 7.0
 const SUPER_MOVE_MULTIPLIER := 2.0
 const SHATTER_SCORE := 15
+const MOVE_KEYS := [KEY_A, KEY_D, KEY_W, KEY_S, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN]
 const LANGUAGE_BUTTON := Rect2(916, 662, 116, 36)
 const MUSIC_BUTTON := Rect2(748, 662, 152, 36)
 const BACKGROUND_MUSIC_PATH := "res://assets/music/bumba-crossing.mp3"
@@ -153,13 +154,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			if phase == Phase.READY or phase == Phase.DEAD:
 				begin_run()
 			elif phase == Phase.PAUSED:
+				_reset_movement_input()
 				phase = Phase.PLAYING
 			elif phase == Phase.PLAYING:
 				try_dash(_movement_input())
 		elif event.keycode == KEY_ESCAPE:
 			if phase == Phase.PLAYING:
+				_reset_movement_input()
 				phase = Phase.PAUSED
 			elif phase == Phase.PAUSED:
+				_reset_movement_input()
 				phase = Phase.PLAYING
 		elif event.keycode == KEY_R and phase != Phase.READY:
 			begin_run()
@@ -180,15 +184,34 @@ func _unhandled_input(event: InputEvent) -> void:
 			if phase == Phase.READY or phase == Phase.DEAD:
 				begin_run()
 			elif phase == Phase.PAUSED:
+				_reset_movement_input()
 				phase = Phase.PLAYING
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and phase == Phase.PLAYING:
-		phase = Phase.PAUSED
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		_reset_movement_input()
+		if phase == Phase.PLAYING:
+			phase = Phase.PAUSED
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN or what == NOTIFICATION_WM_WINDOW_FOCUS_IN:
+		_reset_movement_input()
+
+
+func _reset_movement_input() -> void:
+	# A key released outside the canvas/window may never deliver its key-up event.
+	for code in MOVE_KEYS:
+		if Input.is_physical_key_pressed(code):
+			var release := InputEventKey.new()
+			release.keycode = code
+			release.physical_keycode = code
+			release.pressed = false
+			Input.parse_input_event(release)
+	Input.flush_buffered_events()
+	velocity = Vector2.ZERO
 
 
 func begin_run() -> void:
+	_reset_movement_input()
 	phase = Phase.PLAYING
 	player = ARENA.get_center()
 	velocity = Vector2.ZERO

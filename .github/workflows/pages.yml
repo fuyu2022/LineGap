@@ -82,7 +82,7 @@ jobs:
         run: |
           & $env:LINEGAP_GODOT_PATH --headless --path . --script res://tests/game_test.gd
           if ($LASTEXITCODE -ne 0) { throw 'Game logic checks failed.' }
-          foreach ($lineFile in @('index.html', 'index.js', 'index.wasm', 'index.pck', 'audio.js', 'audio/collect.wav', 'audio/hit.wav', 'audio/shatter.wav', 'audio/death.wav', 'audio/bumba-crossing.mp3', 'Music-Credits.txt', 'Font-License.txt', 'Godot-Licenses.txt', '.nojekyll')) {
+          foreach ($lineFile in @('index.html', 'index.js', 'index.wasm', 'index.pck', 'input.js', 'audio.js', 'audio/collect.wav', 'audio/hit.wav', 'audio/shatter.wav', 'audio/death.wav', 'audio/bumba-crossing.mp3', 'Music-Credits.txt', 'Font-License.txt', 'Godot-Licenses.txt', '.nojekyll')) {
             if (-not (Test-Path -LiteralPath (Join-Path 'builds/LineGap-Web' $lineFile))) {
               throw "Missing exported file: $lineFile"
             }

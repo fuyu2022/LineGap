@@ -18,6 +18,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Web sound effect export failed.' }
 & $GodotPath --headless --path $PSScriptRoot --export-release 'Web' (Join-Path $lineWebDir 'index.html')
 if ($LASTEXITCODE -ne 0) { throw 'Web export failed. Install the matching Godot Web export templates.' }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'web\audio.js') -Destination (Join-Path $lineWebDir 'audio.js') -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'web\input.js') -Destination (Join-Path $lineWebDir 'input.js') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\music\bumba-crossing.mp3') -Destination (Join-Path $lineWebDir 'audio\bumba-crossing.mp3') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\music\ATTRIBUTION.txt') -Destination (Join-Path $lineWebDir 'Music-Credits.txt') -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets\fonts\OFL.txt') -Destination (Join-Path $lineWebDir 'Font-License.txt') -Force
