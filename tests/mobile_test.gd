@@ -33,29 +33,38 @@ func run() -> void:
 	var origin: Vector2 = controls.fixed_center
 	expect(controls.press(0, origin) == "move" and controls.direction == Vector2.ZERO, "Fixed joystick starts neutral at its center")
 	controls.drag(0, origin + Vector2(5, 0))
-	expect(controls.direction == Vector2.ZERO, "Thumb jitter inside the dead zone does not move")
+	expect(controls.direction == Vector2.RIGHT, "Small fixed joystick movement requests full speed")
+	controls.drag(0, origin)
+	expect(controls.direction == Vector2.ZERO, "Returning exactly to the fixed center stops movement")
+	controls.drag(0, origin + Vector2(0.001, 0))
+	expect(controls.direction == Vector2.RIGHT, "Tiny nonzero fixed joystick movement requests full speed")
 	controls.drag(0, origin + Vector2(41.04 * Controls.CONTROL_SCALE, 0))
-	expect(is_equal_approx(controls.direction.x, 0.5), "Analog half deflection gives half movement strength")
+	expect(controls.direction == Vector2.RIGHT, "Half deflection gives full speed")
 	controls.drag(0, origin + Vector2(300, 300))
-	expect(is_equal_approx(controls.direction.length(), 1) and is_equal_approx(controls.knob.length(), Controls.RADIUS), "Fixed knob clamps and diagonal input cannot exceed full speed")
+	expect(is_equal_approx(controls.direction.length(), 1) and is_equal_approx(controls.knob.length(), controls.radius), "Fixed knob clamps and diagonal input cannot exceed full speed")
 	expect(controls.center == origin, "Fixed mode never follows the finger")
 	expect(controls.press(1, origin) == "", "Second left touch cannot steal movement")
 	controls.drag(1, origin - Vector2(300, 0))
 	expect(controls.direction.x > 0, "Unowned finger drags are ignored")
-	expect(controls.press(2, controls.dash_center + Vector2(100, 0)) == "dash" and controls.move_touch == 0, "The doubled dash button accepts a second finger at its enlarged edge without disturbing movement")
+	expect(controls.press(2, controls.dash_center + Vector2(controls.dash_radius - 1, 0)) == "dash" and controls.move_touch == 0, "Resized dash button accepts a second finger near its edge without disturbing movement")
 	controls.release(2)
 	expect(controls.move_touch == 0 and controls.direction.x > 0, "Releasing dash leaves movement active")
+	expect(controls.press(2, controls.dash_center + Vector2(controls.dash_radius + 12 * controls.visual_scale + 1, 0)) == "" and controls.dash_touch == -1, "Outside the resized dash hit area does not capture or trigger a dash")
 	controls.release(0)
 	controls.drag(1, origin + Vector2(300, 0))
 	expect(controls.direction == Vector2.ZERO and controls.move_touch == -1, "A previously ignored held finger is not adopted after release")
 	controls.set_following(true)
 	origin = Vector2(-50, 350)
 	expect(controls.press(4, origin) == "move" and controls.center == origin and controls.direction == Vector2.ZERO, "Following mode establishes a neutral center at the touch landing point")
+	controls.drag(4, origin + Vector2(0, -0.001))
+	expect(controls.center == origin and controls.direction == Vector2.UP, "Tiny following joystick movement requests full speed without moving its center")
+	controls.drag(4, origin)
+	expect(controls.direction == Vector2.ZERO, "Returning exactly to the following center stops movement")
 	controls.drag(4, origin + Vector2(30, 0))
 	expect(controls.center == origin and controls.direction.x > 0, "Small drag moves the knob while the following center stays stable")
 	controls.drag(4, origin + Vector2(200 * Controls.CONTROL_SCALE, 0))
-	expect(controls.center == origin and controls.direction == Vector2.RIGHT and controls.knob.length() == Controls.RADIUS, "Long drag keeps the touchdown center anchored and clamps the knob at full speed")
-	controls.drag(4, controls.center + Vector2(-Controls.RADIUS, 0))
+	expect(controls.center == origin and controls.direction == Vector2.RIGHT and is_equal_approx(controls.knob.length(), controls.radius), "Long drag keeps the touchdown center anchored and clamps the knob at full speed")
+	controls.drag(4, controls.center + Vector2(-controls.radius, 0))
 	expect(controls.direction == Vector2.LEFT, "Crossing the center reverses direction immediately")
 	controls.drag(4, Vector2(1200, 600))
 	expect(controls.move_touch == 4 and controls.center == origin, "Crossing the screen midpoint keeps ownership and the original center")
@@ -70,6 +79,33 @@ func run() -> void:
 	controls.set_following(false)
 	expect(controls.move_touch == -1 and controls.dash_touch == -1 and controls.direction == Vector2.ZERO, "Changing modes cancels captured fingers")
 	expect(controls.press(6, Vector2(800, 200)) == "", "Unassigned right-side touch cannot trigger a dash")
+	var adaptive = Controls.new()
+	for dimensions in [Vector2(1440, 810), Vector2(1440, 1080), Vector2(2560, 1600), Vector2(1200, 600)]:
+		var bounds := Rect2(Vector2.ZERO, dimensions)
+		adaptive.configure(bounds, bounds, bounds)
+		var move_bounds := Rect2(adaptive.fixed_center - Vector2.ONE * adaptive.radius, Vector2.ONE * adaptive.radius * 2)
+		var dash_bounds := Rect2(adaptive.dash_center - Vector2.ONE * adaptive.dash_radius, Vector2.ONE * adaptive.dash_radius * 2)
+		expect(bounds.encloses(move_bounds) and bounds.encloses(dash_bounds), "Adaptive controls remain inside safe bounds at %s" % dimensions)
+		adaptive.press(0, adaptive.fixed_center)
+		adaptive.drag(0, adaptive.fixed_center + Vector2(adaptive.radius * 0.2, 0))
+		expect(adaptive.direction == Vector2.RIGHT, "Small deflection requests the same full speed at %s" % dimensions)
+		adaptive.drag(0, adaptive.fixed_center + Vector2(adaptive.radius * 0.05, 0))
+		expect(adaptive.direction == Vector2.RIGHT, "Very small deflection still requests full speed at %s" % dimensions)
+	adaptive.configure(Rect2(0, 0, 1440, 810), Rect2(0, 0, 1440, 810), Game.ARENA)
+	var phone_radius: float = adaptive.radius
+	adaptive.configure(Rect2(0, 0, 1440, 1080), Rect2(0, 0, 1440, 1080), Game.ARENA)
+	expect(adaptive.radius <= phone_radius and adaptive.dash_radius * 2 <= Controls.MAX_DASH_DIAMETER_DP and adaptive.visual_scale <= Controls.CONTROL_SCALE * Controls.MAX_SIZE_FACTOR, "Tablet controls remain capped instead of enlarging without a display limit")
+	# Exercise actual canvas stretch and Android density independently of logical viewport size.
+	for screen_scale in [0.75, 1.0, 1.5, 2.0, 3.0, 4.0]:
+		for density in [0.75, 1.0, 1.5, 2.0, 3.0, 4.0]:
+			var bounds := Rect2(0, 0, 1440, 1080)
+			adaptive.configure(bounds, bounds, bounds, screen_scale, density)
+			var joystick_dp: float = adaptive.radius * 2 * screen_scale / density
+			var dash_dp: float = adaptive.dash_radius * 2 * screen_scale / density
+			expect(joystick_dp <= Controls.MAX_JOYSTICK_DIAMETER_DP + 0.001 and dash_dp <= Controls.MAX_DASH_DIAMETER_DP + 0.001, "Rendered controls respect display caps at stretch %s density %s" % [screen_scale, density])
+			adaptive.press(0, adaptive.fixed_center)
+			adaptive.drag(0, adaptive.fixed_center + Vector2(adaptive.radius * 0.2, 0))
+			expect(adaptive.direction == Vector2.RIGHT and adaptive.press(1, adaptive.dash_center + Vector2(adaptive.dash_radius - 0.01, 0)) == "dash", "Capped controls preserve full-speed movement and simultaneous edge dash at stretch %s density %s" % [screen_scale, density])
 	var game = Game.new()
 	game.mobile_ui = true
 	game.test_mode = true
@@ -86,10 +122,10 @@ func run() -> void:
 	game.pickup_wait = 999
 	origin = game.touch_controls.fixed_center
 	touch(game, 1, origin)
-	drag(game, 1, origin + Vector2(41.04 * Controls.CONTROL_SCALE, 0))
+	drag(game, 1, origin + Vector2(0.001, 0))
 	var player_before: Vector2 = game.player
 	game._physics_process(0.2)
-	expect(is_equal_approx(game.player.x - player_before.x, 50.25), "Analog half deflection uses 1.5 times the desktop base speed")
+	expect(is_equal_approx(game.player.x - player_before.x, 100.5), "Tiny deflection moves at the full 1.5-times base speed")
 	touch(game, 2, game.touch_controls.dash_center)
 	expect(game.dash_remaining > 0 and game.dash_direction == Vector2.RIGHT and game.touch_controls.move_touch == 1, "Dash button uses joystick heading during simultaneous movement")
 	expect(not game._mobile_dash_ready() and game.dash_cooldown_remaining > 0, "Dash button becomes inactive during cooldown")
@@ -144,7 +180,7 @@ func run() -> void:
 		game._layout_mobile()
 		var safe: Rect2 = game.touch_controls.safe_bounds
 		expect(safe.encloses(game._mobile_settings_panel()) and safe.encloses(game._primary_button()), "Large settings and pause buttons fit the safe area at %s" % str(size))
-		expect(safe.encloses(Rect2(game.touch_controls.fixed_center - Vector2.ONE * Controls.RADIUS, Vector2.ONE * Controls.RADIUS * 2)) and safe.encloses(Rect2(game.touch_controls.dash_center - Vector2.ONE * Controls.DASH_RADIUS, Vector2.ONE * Controls.DASH_RADIUS * 2)), "Doubled touch controls remain fully visible at %s" % str(size))
+		expect(safe.encloses(Rect2(game.touch_controls.fixed_center - Vector2.ONE * game.touch_controls.radius, Vector2.ONE * game.touch_controls.radius * 2)) and safe.encloses(Rect2(game.touch_controls.dash_center - Vector2.ONE * game.touch_controls.dash_radius, Vector2.ONE * game.touch_controls.dash_radius * 2)), "Resized touch controls remain fully visible at %s" % str(size))
 		expect(game.arena_rect.get_area() > game.touch_controls.view_bounds.get_area() * 0.9, "Mobile playfield fills over 90 percent of viewport at %s" % str(size))
 		expect(game.touch_controls.move_touch == -1 and game._movement_input() == Vector2.ZERO, "Resizing cancels old touch ownership at %s" % str(size))
 		var clipped: PackedVector2Array = game._clip_to_arena(Vector2(game.arena_rect.position.x - 100, game.arena_rect.get_center().y), Vector2(game.arena_rect.end.x + 100, game.arena_rect.get_center().y))
@@ -181,7 +217,7 @@ func run() -> void:
 		game._update_pickup(0.01)
 		if game.pickup_active:
 			spawned_outside_old_box = spawned_outside_old_box or not Game.ARENA.has_point(game.pickup)
-			all_pickups_safe = all_pickups_safe and game.arena_rect.has_point(game.pickup) and game.pickup.y >= game.touch_controls.safe_bounds.position.y + 165 and game.pickup.distance_to(game.touch_controls.fixed_center) >= 209 and game.pickup.distance_to(game.touch_controls.dash_center) >= 193
+			all_pickups_safe = all_pickups_safe and game.arena_rect.has_point(game.pickup) and game.pickup.y >= game.touch_controls.safe_bounds.position.y + 165 and game.pickup.distance_to(game.touch_controls.fixed_center) >= game.touch_controls.radius + 65 and game.pickup.distance_to(game.touch_controls.dash_center) >= game.touch_controls.dash_radius + 65
 	expect(spawned_outside_old_box and all_pickups_safe, "Orbs use the expanded mobile playfield while avoiding HUD and touch buttons")
 	for stage in range(1, 4):
 		game.begin_run()

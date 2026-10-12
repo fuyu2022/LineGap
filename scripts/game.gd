@@ -336,7 +336,11 @@ func _layout_mobile() -> void:
 	arena_rect = safe.grow(-16)
 	for item in obstacles:
 		_fit_mobile_obstacle(item)
-	touch_controls.configure(view, safe, arena_rect)
+	var screen_transform := get_viewport().get_screen_transform() * get_global_transform_with_canvas()
+	var screen_pixel_scale := maxf(screen_transform.x.length(), screen_transform.y.length())
+	var screen_dpi := DisplayServer.screen_get_dpi() if OS.has_feature("android") else 160
+	var screen_density := (screen_dpi if screen_dpi > 0 else 160) / 160.0
+	touch_controls.configure(view, safe, arena_rect, screen_pixel_scale, screen_density)
 	player = _clamp_player(player)
 	if ripple_clip != null:
 		ripple_clip.position = arena_rect.position
@@ -1114,7 +1118,7 @@ func _update_pickup(delta: float, previous_player: Vector2 = Vector2.INF) -> voi
 				var padding := maxf(52.0, 19.0 * _world_scale() + 8.0)
 				var candidate := Vector2(rng.randf_range(arena_rect.position.x + padding, arena_rect.end.x - padding), rng.randf_range(arena_rect.position.y + padding, arena_rect.end.y - padding - 1))
 				var safe := candidate.distance_to(player) > 85.0
-				if mobile_ui and (candidate.y < touch_controls.safe_bounds.position.y + 108 + 19 * _world_scale() or candidate.distance_to(touch_controls.fixed_center) < MobileControls.RADIUS + 19 * _world_scale() + 8 or candidate.distance_to(touch_controls.dash_center) < MobileControls.DASH_RADIUS + 19 * _world_scale() + 8):
+				if mobile_ui and (candidate.y < touch_controls.safe_bounds.position.y + 108 + 19 * _world_scale() or candidate.distance_to(touch_controls.fixed_center) < touch_controls.radius + 19 * _world_scale() + 8 or candidate.distance_to(touch_controls.dash_center) < touch_controls.dash_radius + 19 * _world_scale() + 8):
 					safe = false
 				for item in obstacles:
 					var ends := obstacle_endpoints(item)
@@ -1873,27 +1877,26 @@ func _draw_mobile_joystick() -> void:
 	if touch_controls.following and not active:
 		return
 	var color := CYAN if active else MUTED
-	draw_circle(center, MobileControls.RADIUS, Color(0.02, 0.05, 0.05, 0.2))
-	draw_arc(center, MobileControls.RADIUS, 0, TAU, 80, color * Color(1, 1, 1, 0.65), 2.0 * MobileControls.CONTROL_SCALE, true)
-	draw_arc(center, MobileControls.RADIUS * MobileControls.DEAD_ZONE, 0, TAU, 32, color * Color(1, 1, 1, 0.2), MobileControls.CONTROL_SCALE, true)
-	draw_circle(center + touch_controls.knob, 24 * MobileControls.CONTROL_SCALE, color * Color(1, 1, 1, 0.18))
-	draw_arc(center + touch_controls.knob, 24 * MobileControls.CONTROL_SCALE, 0, TAU, 40, color, 2.0 * MobileControls.CONTROL_SCALE, true)
+	draw_circle(center, touch_controls.radius, Color(0.02, 0.05, 0.05, 0.2))
+	draw_arc(center, touch_controls.radius, 0, TAU, 80, color * Color(1, 1, 1, 0.65), 2.0 * touch_controls.visual_scale, true)
+	draw_circle(center + touch_controls.knob, 24 * touch_controls.visual_scale, color * Color(1, 1, 1, 0.18))
+	draw_arc(center + touch_controls.knob, 24 * touch_controls.visual_scale, 0, TAU, 40, color, 2.0 * touch_controls.visual_scale, true)
 
 
 func _draw_mobile_dash_button() -> void:
 	var dash_at: Vector2 = touch_controls.dash_center
 	var ready := _mobile_dash_ready()
 	var dash_color := (GOLD if super_dash_active else CYAN) if ready else MUTED
-	draw_circle(dash_at, MobileControls.DASH_RADIUS, Color(0.02, 0.05, 0.05, 0.25))
-	draw_arc(dash_at, MobileControls.DASH_RADIUS, 0, TAU, 80, dash_color, 2.5 * MobileControls.CONTROL_SCALE, true)
+	draw_circle(dash_at, touch_controls.dash_radius, Color(0.02, 0.05, 0.05, 0.25))
+	draw_arc(dash_at, touch_controls.dash_radius, 0, TAU, 80, dash_color, 2.5 * touch_controls.visual_scale, true)
 	var label := ui_text("mobile_dash") if ready else ("%.1f" % maxf(0.1, dash_cooldown_remaining) if dash_cooldown_remaining > 0 else ui_text("dashing"))
 	if music_mode:
 		label = ui_text("wave" if ready else "beat_wait")
 		var progress: float = music_clock.progress()
-		draw_arc(dash_at, MobileControls.DASH_RADIUS + 12, -PI * 0.5, -PI * 0.5 + TAU * progress, 80, dash_color * Color(1, 1, 1, 0.75), 4.0, true)
+		draw_arc(dash_at, touch_controls.dash_radius + 6 * touch_controls.visual_scale, -PI * 0.5, -PI * 0.5 + TAU * progress, 80, dash_color * Color(1, 1, 1, 0.75), 2 * touch_controls.visual_scale, true)
 		if music_feedback_remaining > 0:
-			_text_at_center(ui_text(music_feedback), dash_at - Vector2(0, MobileControls.DASH_RADIUS + 24), 26, CYAN if music_feedback == "beat_hit" else MUTED)
-	_text_at_center(label, dash_at + Vector2(0, 20), _fit_text_size(label, MobileControls.DASH_RADIUS * 2 - 36, 60), dash_color)
+			_text_at_center(ui_text(music_feedback), dash_at - Vector2(0, touch_controls.dash_radius + 12 * touch_controls.visual_scale), maxi(1, int(13 * touch_controls.visual_scale)), CYAN if music_feedback == "beat_hit" else MUTED)
+	_text_at_center(label, dash_at + Vector2(0, 10 * touch_controls.visual_scale), _fit_text_size(label, touch_controls.dash_radius * 2 - 18 * touch_controls.visual_scale, maxi(1, int(30 * touch_controls.visual_scale)), 1), dash_color)
 	if super_dash_active:
 		_center_text(ui_text("super_music" if music_mode else "super_dash") % super_dash_remaining, touch_controls.safe_bounds.end.y - 18, 28, GOLD)
 	else:
@@ -1965,9 +1968,9 @@ func _text_at_center(value: String, at: Vector2, size: int, color: Color) -> voi
 	_text(value, at - Vector2(width * 0.5, 0), size, color)
 
 
-func _fit_text_size(value: String, max_width: float, preferred: int) -> int:
+func _fit_text_size(value: String, max_width: float, preferred: int, minimum: int = 11) -> int:
 	var size := preferred
-	while size > 11 and font.get_string_size(value, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_width:
+	while size > minimum and font.get_string_size(value, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_width:
 		size -= 1
 	return size
 
